@@ -1,0 +1,16 @@
+.DS_Store
+
+# Local music and video files are user content, not application source.
+*.aac
+*.flac
+*.m4a
+*.mp3
+*.mov
+*.mp4
+*.ogg
+*.wav
+
+# Existing artwork/media in this workspace.
+*.jpg
+*.jpeg
+*.png

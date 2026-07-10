@@ -93,6 +93,48 @@
             <button class="tone" data-wave="triangle">SOFT</button>
           </div>
         </div>
+
+        <div class="music-block">
+          <div class="section-heading">
+            <p class="eyebrow">LOCAL MUSIC</p>
+            <span>ON-DEVICE ANALYSIS</span>
+          </div>
+
+          <div class="music-workspace">
+            <div class="track-loader">
+              <input id="audioFile" type="file" accept="audio/*,.mp3,.m4a,.wav,.aac,.flac,.ogg" hidden />
+              <label class="load-button" for="audioFile"><span>＋</span> LOAD AUDIO</label>
+              <div class="track-copy">
+                <strong id="trackName">No track loaded</strong>
+                <span id="trackMeta">MP3, M4A, WAV, AAC, FLAC OR OGG · FILE STAYS ON THIS DEVICE</span>
+              </div>
+            </div>
+
+            <div class="key-display" aria-live="polite">
+              <span class="key-label">DETECTED KEY</span>
+              <strong id="detectedKey">—</strong>
+              <span id="keyConfidence">WAITING FOR AUDIO</span>
+            </div>
+
+            <div class="match-controls">
+              <button class="match-button active" id="autoMatchButton" aria-pressed="true" disabled>
+                <i></i><span><b>AUTO-MATCH CARRIER</b><small id="matchStatus">LOAD A TRACK TO BEGIN</small></span>
+              </button>
+              <div class="segmented relation-picker" aria-label="Carrier relationship">
+                <button class="relation active" data-relation="0">ROOT</button>
+                <button class="relation" data-relation="7">FIFTH</button>
+              </div>
+            </div>
+          </div>
+
+          <div class="timeline disabled" id="timeline">
+            <span id="currentTime">0:00</span>
+            <input id="trackPosition" type="range" min="0" max="100" value="0" step="0.1" aria-label="Track position" disabled />
+            <span id="duration">0:00</span>
+            <label for="musicVolume">MUSIC <input id="musicVolume" type="range" min="0" max="1" value="0.8" step="0.01" /></label>
+          </div>
+          <audio id="musicPlayer" preload="metadata"></audio>
+        </div>
       </section>
     </main>
 
@@ -101,6 +143,7 @@
       <p class="eyebrow">HOW IT WORKS</p>
       <h2>A difference you can hear.</h2>
       <p>Phase sends a slightly different tone to each ear. Your brain perceives the frequency gap as a gentle rhythmic pulse. The ten faders mix harmonic carrier pairs for a richer sound.</p>
+      <p>When local music is loaded, Phase estimates its key from a rolling chroma profile and can glide the carrier toward the detected root or fifth. Your file never leaves the browser.</p>
       <p class="fine-print">Use stereo headphones at a comfortable volume. This is a relaxation and focus tool, not a medical treatment. Do not use while driving.</p>
     </dialog>
 
