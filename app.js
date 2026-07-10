@@ -15,6 +15,7 @@ const voices = [];
 const musicSources = [], musicGains = [];
 let activeDeck = 0, crossfadeInProgress = false, crossfadeTimer, crossfadeToneTarget;
 let detectedRoot = null;
+let recordDestination, mediaRecorder, recordedChunks = [], recordingWritable, recordingWriteQueue = Promise.resolve(), isRecording = false, saveRecordingOnStop = true;
 const playlist = [];
 let currentTrackIndex = -1, trackSequence = 0, isAnalysingSet = false;
 const KEY_CONFIDENCE_THRESHOLD = .22;
@@ -75,6 +76,8 @@ function createAudio() {
   masterGain = audioContext.createGain();
   masterGain.gain.value = 0;
   masterGain.connect(audioContext.destination);
+  recordDestination = audioContext.createMediaStreamDestination();
+  masterGain.connect(recordDestination);
 
   connectMusicSources();
 
@@ -102,7 +105,9 @@ function connectMusicSources() {
     const source = audioContext.createMediaElementSource(player);
     const gain = audioContext.createGain();
     gain.gain.value = deck === activeDeck ? Number($("musicVolume").value) : 0;
-    source.connect(gain).connect(audioContext.destination);
+    source.connect(gain);
+    gain.connect(audioContext.destination);
+    gain.connect(recordDestination);
     musicSources.push(source);
     musicGains.push(gain);
   });
@@ -168,7 +173,13 @@ async function togglePlay() {
   $("sortKeyButton").disabled = state.playing || playlist.length < 2 || playlist.some((track) => track.status !== "analysed");
   $("playButton").setAttribute("aria-pressed", String(state.playing));
   $("playButton").setAttribute("aria-label", state.playing ? "Pause audio" : "Start audio");
-  $("playStatus").textContent = state.playing && playlist.length ? `PLAYING ${currentTrackIndex + 1}/${playlist.length}` : state.playing ? "PLAYING" : "PAUSED";
+  if (isRecording && mediaRecorder) {
+    if (state.playing && mediaRecorder.state === "paused") mediaRecorder.resume();
+    else if (!state.playing && mediaRecorder.state === "recording") mediaRecorder.pause();
+  }
+  $("playStatus").textContent = isRecording
+    ? state.playing ? `RECORDING ${currentTrackIndex + 1}/${playlist.length}` : "RECORDING PAUSED"
+    : state.playing && playlist.length ? `PLAYING ${currentTrackIndex + 1}/${playlist.length}` : state.playing ? "PLAYING" : "PAUSED";
   if (activePlayer().src) {
     if (state.playing) {
       try { await activePlayer().play(); } catch (error) { console.warn("The local track could not start", error); }
@@ -178,6 +189,127 @@ async function togglePlay() {
       if (crossfadeInProgress) cancelCrossfade();
     }
   }
+}
+
+function recordingFormat() {
+  if (!window.MediaRecorder) return null;
+  const candidates = [
+    { mimeType: "audio/mp4;codecs=mp4a.40.2", extension: "m4a" },
+    { mimeType: "audio/webm;codecs=opus", extension: "webm" },
+    { mimeType: "audio/ogg;codecs=opus", extension: "ogg" }
+  ];
+  return candidates.find((candidate) => MediaRecorder.isTypeSupported?.(candidate.mimeType)) || { mimeType: "", extension: "webm" };
+}
+
+function recordingFilename(extension) {
+  const timestamp = new Date().toISOString().slice(0, 19).replace(/[:T]/g, "-");
+  return `phase-set-${timestamp}.${extension}`;
+}
+
+function downloadRecording(blob, extension) {
+  const url = URL.createObjectURL(blob);
+  const link = document.createElement("a");
+  link.href = url;
+  link.download = recordingFilename(extension);
+  link.style.display = "none";
+  document.body.appendChild(link);
+  link.click();
+  link.remove();
+  setTimeout(() => URL.revokeObjectURL(url), 60000);
+}
+
+function updateRecordingUI() {
+  document.body.classList.toggle("recording", isRecording);
+  $("recordSetButton").setAttribute("aria-pressed", String(isRecording));
+  $("recordSetButton").setAttribute("aria-label", isRecording ? "Stop recording and save the set" : "Play and record the full set");
+  $("recordSetButton").querySelector("span").textContent = isRecording ? "STOP + SAVE" : "PLAY + REC SET";
+  $("audioFile").disabled = isRecording || isAnalysingSet;
+  renderPlaylist();
+}
+
+async function startSetRecording() {
+  if (!playlist.length || playlist.some((track) => track.status !== "analysed")) {
+    $("playStatus").textContent = "ANALYSE SET FIRST";
+    return;
+  }
+  const format = recordingFormat();
+  if (!format) {
+    $("playStatus").textContent = "RECORDING UNSUPPORTED";
+    return;
+  }
+  if (!createAudio()) {
+    $("playStatus").textContent = "AUDIO UNSUPPORTED";
+    return;
+  }
+  const options = format.mimeType ? { mimeType: format.mimeType, audioBitsPerSecond: 256000 } : { audioBitsPerSecond: 256000 };
+  try { mediaRecorder = new MediaRecorder(recordDestination.stream, options); }
+  catch (error) {
+    try { mediaRecorder = new MediaRecorder(recordDestination.stream); }
+    catch (fallbackError) { console.warn("Recording could not start", fallbackError); $("playStatus").textContent = "RECORDING ERROR"; return; }
+  }
+  const actualType = mediaRecorder.mimeType || format.mimeType || "audio/webm";
+  const extension = actualType.includes("mp4") ? "m4a" : actualType.includes("ogg") ? "ogg" : "webm";
+  recordingWritable = null;
+  recordingWriteQueue = Promise.resolve();
+  if (window.showSaveFilePicker) {
+    try {
+      const baseType = actualType.split(";")[0];
+      const handle = await window.showSaveFilePicker({
+        suggestedName: recordingFilename(extension),
+        types: [{ description: "Phase set recording", accept: { [baseType]: [`.${extension}`] } }]
+      });
+      recordingWritable = await handle.createWritable();
+    } catch (error) {
+      mediaRecorder = null;
+      if (error.name !== "AbortError") console.warn("Could not open the destination file", error);
+      return;
+    }
+  }
+
+  if (state.playing) await togglePlay();
+  await selectTrack(0, false);
+  if (audioContext.state === "suspended") await audioContext.resume();
+
+  recordedChunks = [];
+  saveRecordingOnStop = true;
+  mediaRecorder.addEventListener("dataavailable", (event) => {
+    if (!event.data?.size) return;
+    if (recordingWritable) recordingWriteQueue = recordingWriteQueue.then(() => recordingWritable.write(event.data));
+    else recordedChunks.push(event.data);
+  });
+  mediaRecorder.addEventListener("error", (event) => { console.warn("Recording error", event.error); $("playStatus").textContent = "RECORDING ERROR"; });
+  mediaRecorder.addEventListener("stop", async () => {
+    try {
+      await recordingWriteQueue;
+      if (recordingWritable) {
+        if (saveRecordingOnStop) await recordingWritable.close();
+        else await recordingWritable.abort();
+      } else if (saveRecordingOnStop && recordedChunks.length) {
+        downloadRecording(new Blob(recordedChunks, { type: actualType }), extension);
+      }
+    } catch (error) {
+      console.warn("Could not finish the recording file", error);
+      $("playStatus").textContent = "SAVE ERROR";
+    }
+    recordedChunks = [];
+    recordingWritable = null;
+    recordingWriteQueue = Promise.resolve();
+    mediaRecorder = null;
+  }, { once: true });
+
+  isRecording = true;
+  mediaRecorder.start(1000);
+  updateRecordingUI();
+  await togglePlay();
+}
+
+function stopSetRecording(save = true) {
+  if (!isRecording || !mediaRecorder) return;
+  saveRecordingOnStop = save;
+  if (mediaRecorder.state === "paused") mediaRecorder.resume();
+  if (mediaRecorder.state !== "inactive") mediaRecorder.stop();
+  isRecording = false;
+  updateRecordingUI();
 }
 
 function applyPreset(index) {
@@ -224,9 +356,10 @@ function formatTime(seconds) {
 function updateSetSummary() {
   const analysed = playlist.filter((track) => track.status === "analysed").length;
   $("setSummary").textContent = `${playlist.length} TRACK${playlist.length === 1 ? "" : "S"} · ${analysed} ANALYSED · ON-DEVICE`;
-  $("analyseSetButton").disabled = playlist.length === 0 || isAnalysingSet;
-  $("clearSetButton").disabled = playlist.length === 0 || isAnalysingSet;
-  $("sortKeyButton").disabled = playlist.length < 2 || isAnalysingSet || state.playing || playlist.some((track) => track.status !== "analysed");
+  $("analyseSetButton").disabled = playlist.length === 0 || isAnalysingSet || isRecording;
+  $("clearSetButton").disabled = playlist.length === 0 || isAnalysingSet || isRecording;
+  $("sortKeyButton").disabled = playlist.length < 2 || isAnalysingSet || state.playing || isRecording || playlist.some((track) => track.status !== "analysed");
+  $("recordSetButton").disabled = !isRecording && (playlist.length === 0 || isAnalysingSet || playlist.some((track) => track.status !== "analysed"));
 }
 
 function renderPlaylist() {
@@ -254,7 +387,7 @@ function renderPlaylist() {
     title.className = "track-title-button";
     title.textContent = track.name;
     title.setAttribute("aria-label", `Play ${track.name}`);
-    title.disabled = track.status !== "analysed" || isAnalysingSet;
+    title.disabled = track.status !== "analysed" || isAnalysingSet || isRecording;
     title.addEventListener("click", () => selectTrack(index, state.playing));
 
     const key = document.createElement("span");
@@ -273,6 +406,7 @@ function renderPlaylist() {
 
     const presetCue = document.createElement("select");
     presetCue.className = `preset-cue${track.presetOverride != null ? " cued" : ""}`;
+    presetCue.disabled = isRecording;
     presetCue.setAttribute("aria-label", `State cue for ${track.name}`);
     [{ label: "CONTINUE", value: "" }, ...presets.map((preset, presetIndex) => ({ label: preset.name.toUpperCase(), value: String(presetIndex) }))].forEach((optionData) => {
       const option = document.createElement("option");
@@ -298,7 +432,7 @@ function renderPlaylist() {
       button.className = "row-action";
       button.textContent = action.glyph;
       button.setAttribute("aria-label", `${action.label} ${track.name}`);
-      button.disabled = action.disabled || isAnalysingSet;
+      button.disabled = action.disabled || isAnalysingSet || isRecording;
       button.addEventListener("click", action.run);
       actions.appendChild(button);
     });
@@ -555,7 +689,7 @@ async function startCrossfade() {
   musicGains[activeDeck].gain.setValueCurveAtTime(fadeOut, now, duration);
   musicGains[nextDeck].gain.setValueCurveAtTime(fadeIn, now, duration);
   scheduleToneCrossfade(playlist[nextIndex], duration);
-  $("playStatus").textContent = `CROSSFADE ${currentTrackIndex + 1}→${nextIndex + 1}`;
+  $("playStatus").textContent = `${isRecording ? "REC " : ""}CROSSFADE ${currentTrackIndex + 1}→${nextIndex + 1}`;
   crossfadeTimer = setTimeout(finishCrossfade, duration * 1000);
 }
 
@@ -573,7 +707,7 @@ function finishCrossfade() {
   setDeckGain(previousDeck, 0, .01);
   setDeckGain(activeDeck, Number($("musicVolume").value), .03);
   presentTrack(currentTrackIndex, false);
-  $("playStatus").textContent = `PLAYING ${currentTrackIndex + 1}/${playlist.length}`;
+  $("playStatus").textContent = `${isRecording ? "RECORDING" : "PLAYING"} ${currentTrackIndex + 1}/${playlist.length}`;
 }
 
 function maybeStartCrossfade() {
@@ -897,6 +1031,7 @@ $("audioFile").addEventListener("change", (event) => {
 $("analyseSetButton").addEventListener("click", () => analyseSet(true));
 $("sortKeyButton").addEventListener("click", sortPlaylistByKey);
 $("clearSetButton").addEventListener("click", () => {
+  if (isRecording) stopSetRecording(false);
   if (state.playing && activePlayer().src) {
     state.playing = false;
     deckPlayers().forEach((player) => player.pause());
@@ -944,12 +1079,14 @@ deckPlayers().forEach((player) => {
       $("playStatus").textContent = `PLAYING ${nextIndex + 1}/${playlist.length}`;
       return;
     }
+    const completedRecording = isRecording;
     state.playing = false;
     if (audioContext) masterGain.gain.setTargetAtTime(0, audioContext.currentTime, .06);
     document.body.classList.remove("playing");
     $("playButton").setAttribute("aria-pressed", "false");
     $("playButton").setAttribute("aria-label", "Start audio");
-    $("playStatus").textContent = "FINISHED";
+    if (completedRecording) stopSetRecording(true);
+    $("playStatus").textContent = completedRecording ? "SAVING RECORDING" : "FINISHED";
   });
 });
 $("trackPosition").addEventListener("input", (event) => {
@@ -968,6 +1105,13 @@ $("crossfadeButton").addEventListener("click", () => {
 $("crossfadeSeconds").addEventListener("input", (event) => {
   state.crossfadeSeconds = Number(event.target.value);
   $("crossfadeValue").textContent = `${state.crossfadeSeconds}s`;
+});
+$("recordSetButton").addEventListener("click", async () => {
+  if (isRecording) {
+    if (state.playing) await togglePlay();
+    stopSetRecording(true);
+    $("playStatus").textContent = "SAVING RECORDING";
+  } else await startSetRecording();
 });
 $("autoMatchButton").addEventListener("click", () => {
   state.autoMatch = !state.autoMatch;

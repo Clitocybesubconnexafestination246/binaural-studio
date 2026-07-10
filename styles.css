@@ -206,6 +206,11 @@ body.playing .meter i { animation: meter 900ms ease-in-out infinite alternate; }
 .utility-button { margin-left: 12px; padding: 12px; border: 0; background: transparent; color: var(--accent); font-size: 18px; cursor: pointer; }
 .utility-button:first-of-type { margin-left: auto; }
 .utility-button span { margin-left: 6px; color: var(--muted); font-size: 9px; }
+.record-button { display: inline-flex; align-items: center; gap: 3px; color: var(--ink); }
+.record-button i { width: 8px; height: 8px; border-radius: 50%; background: #e25d49; box-shadow: 0 0 0 3px rgba(226,93,73,.1); }
+.record-button:disabled { opacity: .28; cursor: not-allowed; }
+body.recording .record-button { color: #ff8b79; }
+body.recording .record-button i { animation: recordPulse 1.2s ease-in-out infinite; }
 
 .controls {
   position: relative;
@@ -411,6 +416,7 @@ dialog p { color: var(--muted); line-height: 1.65; }
 @keyframes rise { from { opacity: 0; transform: translateY(22px); } to { opacity: 1; transform: translateY(0); } }
 @keyframes breathe { 50% { box-shadow: 0 0 0 10px rgba(239,158,71,0), 0 0 45px rgba(239,158,71,.34); } }
 @keyframes meter { from { transform: scaleY(.25); } to { transform: scaleY(4); } }
+@keyframes recordPulse { 50% { opacity: .35; box-shadow: 0 0 0 8px rgba(226,93,73,0); } }
 
 @media (max-width: 980px) {
   .studio { grid-template-columns: 1fr auto; grid-template-rows: auto auto auto; }

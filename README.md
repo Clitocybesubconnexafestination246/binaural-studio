@@ -16,6 +16,12 @@ Use **Sort by key** to build a harmonically adjacent running order; uncertain ke
 
 During an automatic crossfade, the binaural carrier, beat frequency, harmonic balance, and output level interpolate across the same transition window as the music. Reliable key changes therefore keep the pleasing pitch slide without an abrupt reconfiguration at the handoff. Bright Alert uses a 110 Hz carrier and a steeply reduced upper-harmonic mix to keep its 32 Hz beat usable at lower perceived pitch.
 
+## Recording a set
+
+After every track has been analysed, choose **Play + Rec Set**. Phase rewinds to track one and captures the exact combined Web Audio output—including local music, equal-power crossfades, state cues, carrier transitions, and the binaural layer—in real time. The recorder pauses and resumes with the main transport, stops automatically after the final track, and saves one local file. The browser chooses the best available format: M4A/AAC where supported, otherwise WebM/Opus or Ogg/Opus. No microphone permission or upload is involved.
+
+In browsers supporting the File System Access API, Phase asks for the destination first and streams one-second encoded chunks directly to disk throughout the set, keeping memory use essentially constant. Other browsers fall back to assembling the final download in memory. A separate FFmpeg renderer would only be necessary for faster-than-real-time export and would require a manifest/desktop companion to reproduce the browser's resolved track paths and automation.
+
 ## Run locally
 
 No build step or dependencies are required. From this folder, start any static server:
