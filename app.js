@@ -21,7 +21,7 @@ let currentTrackIndex = -1, trackSequence = 0, isAnalysingSet = false;
 const KEY_CONFIDENCE_THRESHOLD = .22;
 const BPM_CONFIDENCE_THRESHOLD = .3;
 const breathingRates = [4.5, 5, 5.5, 6, 6.5, 7, 8];
-let adaptiveGain, airSource, airGain, airFilter, airPanner, impulseTimer, nextRainTime = null;
+let adaptiveGain, airSource, airGain, airFilter, airPanner, impulseTimer, nextRainTime = null, rainActive = false;
 
 const noteNames = ["C", "C♯", "D", "E♭", "E", "F", "F♯", "G", "A♭", "A", "B♭", "B"];
 const majorProfile = [6.35, 2.23, 3.48, 2.33, 4.38, 4.09, 2.52, 5.19, 2.39, 3.66, 2.29, 2.88];
@@ -120,6 +120,20 @@ function noiseBuffer(seconds = 2) {
   return buffer;
 }
 
+function impulseBuffer(duration, resonanceFrequency) {
+  const buffer = audioContext.createBuffer(1, Math.ceil(audioContext.sampleRate * duration), audioContext.sampleRate);
+  const data = buffer.getChannelData(0);
+  const phase = Math.random() * Math.PI * 2;
+  for (let i = 0; i < data.length; i++) {
+    const time = i / audioContext.sampleRate;
+    const crack = (Math.random() * 2 - 1) * Math.exp(-time * 230);
+    const body = Math.sin(Math.PI * 2 * resonanceFrequency * time + phase) * Math.exp(-time * 82);
+    const leadingEdge = i < 3 ? (Math.random() * 2 - 1) * (1 - i / 3) : 0;
+    data[i] = crack * .72 + body * .34 + leadingEdge * .68;
+  }
+  return buffer;
+}
+
 function createAirBed() {
   airSource = audioContext.createBufferSource();
   airSource.buffer = noiseBuffer(3);
@@ -162,6 +176,31 @@ function trackEnergyAt(track, time) {
   return track.envelope.values[index];
 }
 
+function textureOpportunityAt(track, time) {
+  if (!track?.envelope?.values?.length) return 0;
+  const values = track.envelope.values;
+  const pointsPerSecond = track.envelope.pointsPerSecond;
+  const centre = Math.max(0, Math.min(values.length - 1, Math.floor(time * pointsPerSecond)));
+  const radius = Math.max(1, Math.ceil(pointsPerSecond * 1.25));
+  let sum = 0, peak = 0, count = 0;
+  for (let index = Math.max(0, centre - radius); index <= Math.min(values.length - 1, centre + radius); index++) {
+    sum += values[index];
+    peak = Math.max(peak, values[index]);
+    count += 1;
+  }
+  const contextualEnergy = (sum / count) * .72 + peak * .28;
+  const quietness = Math.max(0, Math.min(1, (.42 - contextualEnergy) / .32));
+  if (quietness <= .18) return 0;
+
+  // Very quiet passages always qualify. Moderately quiet passages use stable,
+  // track-specific five-second windows so the texture visits rather than carpets.
+  if (contextualEnergy < .1) return quietness;
+  const trackSeed = Number(String(track.id || "0").replace(/\D/g, "")) || 1;
+  const windowIndex = Math.floor(time / 5.25);
+  const pseudoRandom = Math.sin((trackSeed * 37 + windowIndex * 101) * 12.9898) * 43758.5453;
+  return pseudoRandom - Math.floor(pseudoRandom) < .42 ? quietness : 0;
+}
+
 function breathingPlan(track = playlist[currentTrackIndex]) {
   const presetIndex = state.preset >= 0 ? state.preset : Math.max(0, Math.min(6, Math.round(state.beat / 5)));
   const targetRate = breathingRates[presetIndex];
@@ -192,7 +231,7 @@ function updateAdaptiveStatus(track = playlist[currentTrackIndex]) {
   }
   const locked = track.bpmConfidence >= BPM_CONFIDENCE_THRESHOLD;
   $("impulseStatus").textContent = state.impulse
-    ? locked ? `${Math.round(track.bpm)} BPM · BPM-SHAPED RAIN` : "LOW CONF · CONTINUOUS AIR"
+    ? locked ? "QUIET WINDOWS · ARMED" : "LOW CONF · CONTINUOUS AIR"
     : "OFF";
   const plan = breathingPlan(track);
   $("breathStatus").textContent = state.breathing ? `${plan.rate.toFixed(1)}/MIN${plan.beats ? ` · ${plan.beats} BEATS` : " · FREE"}` : "OFF";
@@ -208,55 +247,71 @@ function updateAirBed(immediate = false) {
   const prominence = Math.max(quietness * .7, crossfadeLift);
   const target = state.playing && state.impulse && lowConfidence
     ? state.textureIntensity * (.012 + prominence * .02)
-    : state.playing && state.impulse && crossfadeInProgress ? state.textureIntensity * .014 : 0;
+    : state.playing && state.impulse && crossfadeInProgress ? state.textureIntensity * .024 : 0;
   airGain.gain.setTargetAtTime(target, audioContext.currentTime, immediate ? .08 : 1.1);
   airPanner.pan.setTargetAtTime(state.spatial ? Math.sin(activePlayer().currentTime * .14) * .38 : 0, audioContext.currentTime, 1.4);
 }
 
-function scheduleImpulse(when, strength = 1, transition = false) {
+function scheduleImpulse(when, strength = 1) {
   if (!audioContext || !adaptiveGain || !state.impulse) return;
+  const duration = .009 + Math.random() * .029;
+  const resonanceFrequency = 900 + Math.pow(Math.random(), .72) * 5100;
   const source = audioContext.createBufferSource();
-  source.buffer = noiseBuffer(transition ? .8 : .11);
-  source.loop = transition;
+  source.buffer = impulseBuffer(duration, resonanceFrequency);
   const filter = audioContext.createBiquadFilter();
-  filter.type = "bandpass";
-  filter.frequency.value = transition ? 1050 : 900 + Math.pow(Math.random(), .65) * 5200;
-  filter.Q.value = transition ? .32 : .45 + Math.random() * .8;
+  filter.type = "highpass";
+  filter.frequency.value = 260 + Math.pow(Math.random(), 1.7) * 1900;
+  filter.Q.value = .35 + Math.random() * .45;
   const gain = audioContext.createGain();
   const panner = audioContext.createStereoPanner();
-  const duration = transition ? Math.max(.8, state.crossfadeSeconds * .55) : .018 + Math.random() * .062;
-  const peak = state.textureIntensity * .075 * (.62 + strength * .55) * (.72 + Math.random() * .38);
-  const width = state.spatial ? (transition ? .92 : .45 + Math.random() * .5) : 0;
+  const peak = state.textureIntensity * .12 * (.72 + strength * .5) * (.78 + Math.random() * .42);
+  const width = state.spatial ? .48 + Math.random() * .5 : 0;
   const direction = Math.random() < .5 ? -1 : 1;
-  gain.gain.setValueAtTime(0.0001, when);
-  gain.gain.exponentialRampToValueAtTime(Math.max(.0002, peak), when + Math.min(.025, duration * .2));
+  gain.gain.setValueAtTime(Math.max(.0002, peak), when);
   gain.gain.exponentialRampToValueAtTime(.0001, when + duration);
-  panner.pan.setValueAtTime(transition ? -direction * width : direction * width, when);
-  panner.pan.linearRampToValueAtTime(transition ? direction * width : direction * width * .72, when + duration);
+  panner.pan.setValueAtTime(direction * width, when);
   source.connect(filter).connect(gain).connect(panner).connect(adaptiveGain);
   source.start(when);
   source.stop(when + duration + .02);
+}
+
+function scheduleTransitionTexture(startTime, duration) {
+  const pocketStart = startTime + duration * .31;
+  const pocketEnd = startTime + duration * .69;
+  let when = pocketStart;
+  while (when < pocketEnd) {
+    scheduleImpulse(when, .72 + Math.random() * .4);
+    when += .045 + Math.random() * .105;
+  }
 }
 
 function scheduleAdaptiveAudio() {
   if (!audioContext || !state.playing) return;
   updateAirBed();
   const track = playlist[currentTrackIndex];
-  if (!state.impulse || crossfadeInProgress || !track?.bpm || track.bpmConfidence < BPM_CONFIDENCE_THRESHOLD) return;
+  if (!state.impulse || crossfadeInProgress || !track?.bpm || track.bpmConfidence < BPM_CONFIDENCE_THRESHOLD) {
+    rainActive = false;
+    return;
+  }
   const player = activePlayer();
   const now = audioContext.currentTime;
   const horizon = now + .3;
+  const opportunity = textureOpportunityAt(track, player.currentTime);
+  if (opportunity <= .18) {
+    if (rainActive) $("impulseStatus").textContent = "QUIET WINDOWS · ARMED";
+    rainActive = false;
+    nextRainTime = null;
+    return;
+  }
+  if (!rainActive) $("impulseStatus").textContent = "QUIET WINDOW · IMPULSES";
+  rainActive = true;
   if (nextRainTime == null || nextRainTime < now) nextRainTime = now + .02;
   while (nextRainTime <= horizon) {
     const futureTrackTime = player.currentTime + (nextRainTime - now);
-    const energy = trackEnergyAt(track, futureTrackTime);
-    const beatPosition = (futureTrackTime - (track.beatOffset || 0)) * track.bpm / 60;
-    // BPM shapes a slow bar-sized density swell; the droplets themselves remain
-    // stochastic, avoiding the sound of an extra (and possibly wrong) drum part.
-    const phraseShape = .78 + .22 * (.5 + .5 * Math.cos(beatPosition * Math.PI / 2));
-    const quietness = 1 - energy;
-    const rate = (5 + state.textureIntensity * 16 + quietness * 4) * phraseShape;
-    const strength = .42 + quietness * .58;
+    const futureOpportunity = textureOpportunityAt(track, futureTrackTime);
+    if (futureOpportunity <= .18) break;
+    const rate = 6.5 + state.textureIntensity * 10 + futureOpportunity * 2;
+    const strength = .48 + futureOpportunity * .52;
     scheduleImpulse(nextRainTime, strength);
     const randomInterval = -Math.log(Math.max(.001, 1 - Math.random())) / rate;
     nextRainTime += Math.max(.026, Math.min(.22, randomInterval));
@@ -266,6 +321,7 @@ function scheduleAdaptiveAudio() {
 function startAdaptiveAudio() {
   clearInterval(impulseTimer);
   nextRainTime = null;
+  rainActive = false;
   updateAirBed(true);
   impulseTimer = setInterval(scheduleAdaptiveAudio, 90);
 }
@@ -274,6 +330,7 @@ function stopAdaptiveAudio() {
   clearInterval(impulseTimer);
   impulseTimer = null;
   nextRainTime = null;
+  rainActive = false;
   updateAirBed(true);
 }
 
@@ -728,6 +785,7 @@ function presentTrack(index, applyAudio = true) {
   else if (track.tonic != null) setDetectedKey(track.tonic, track.key, track.confidence, applyAudio);
   applyDynamicToneLevel(applyAudio);
   nextRainTime = null;
+  rainActive = false;
   updateAdaptiveStatus(track);
   updateAirBed(true);
   renderPlaylist();
@@ -854,14 +912,15 @@ async function startCrossfade() {
   const currentVolume = Math.max(0, musicGains[activeDeck].gain.value);
   for (let step = 0; step < curveSteps; step++) {
     const progress = step / (curveSteps - 1);
-    fadeOut[step] = Math.cos(progress * Math.PI / 2) * currentVolume;
-    fadeIn[step] = Math.sin(progress * Math.PI / 2) * targetVolume;
+    const centrePocket = 1 - .52 * Math.pow(Math.sin(progress * Math.PI), 6);
+    fadeOut[step] = Math.cos(progress * Math.PI / 2) * currentVolume * centrePocket;
+    fadeIn[step] = Math.sin(progress * Math.PI / 2) * targetVolume * centrePocket;
   }
   musicGains[activeDeck].gain.setValueCurveAtTime(fadeOut, now, duration);
   musicGains[nextDeck].gain.setValueCurveAtTime(fadeIn, now, duration);
   scheduleToneCrossfade(playlist[nextIndex], duration);
   updateAirBed(true);
-  scheduleImpulse(now + duration * .22, .85, true);
+  scheduleTransitionTexture(now, duration);
   $("playStatus").textContent = `${isRecording ? "REC " : ""}CROSSFADE ${currentTrackIndex + 1}→${nextIndex + 1}`;
   crossfadeTimer = setTimeout(finishCrossfade, duration * 1000);
 }
