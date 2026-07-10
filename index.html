@@ -80,8 +80,8 @@
             <input id="beatFrequency" type="range" min="1" max="40" value="8" step="0.1" />
           </label>
           <label class="range-row" for="carrierFrequency">
-            <span><b>Base carrier</b><small id="carrierValue">180 Hz</small></span>
-            <input id="carrierFrequency" type="range" min="90" max="360" value="180" step="1" />
+            <span><b>Base carrier</b><small id="carrierValue">130 Hz</small></span>
+            <input id="carrierFrequency" type="range" min="80" max="360" value="130" step="1" />
           </label>
           <label class="range-row" for="masterVolume">
             <span><b>Output</b><small id="volumeValue">35%</small></span>
@@ -127,6 +127,9 @@
               <button class="match-button active" id="autoMatchButton" aria-pressed="true" disabled>
                 <i></i><span><b>AUTO-MATCH CARRIER</b><small id="matchStatus">LOAD A TRACK TO BEGIN</small></span>
               </button>
+              <button class="match-button level-button active" id="autoLevelButton" aria-pressed="true" disabled>
+                <i></i><span><b>AUTO-LEVEL BINAURAL</b><small id="autoLevelStatus">WAITING FOR WAVEFORM</small></span>
+              </button>
               <div class="segmented relation-picker" aria-label="Carrier relationship">
                 <button class="relation active" data-relation="0">ROOT</button>
                 <button class="relation" data-relation="7">FIFTH</button>
@@ -157,7 +160,7 @@
       <p class="eyebrow">HOW IT WORKS</p>
       <h2>A difference you can hear.</h2>
       <p>Phase sends a slightly different tone to each ear. Your brain perceives the frequency gap as a gentle rhythmic pulse. The ten faders mix harmonic carrier pairs for a richer sound.</p>
-      <p>Load an ordered local set and analyse it in one pass. Phase estimates each track's key and can glide the carrier toward the detected root or fifth as the playlist advances. Your files never leave the browser.</p>
+      <p>Load an ordered local set and analyse it in one pass. Phase estimates each track's key, maps its loudness envelope, and ducks the binaural layer through exposed quiet passages. Low-confidence keys hold the last reliable carrier. Your files never leave the browser.</p>
       <p class="fine-print">Use stereo headphones at a comfortable volume. This is a relaxation and focus tool, not a medical treatment. Do not use while driving.</p>
     </dialog>
 

@@ -340,6 +340,7 @@ body.playing .meter i { animation: meter 900ms ease-in-out infinite alternate; }
 .match-button.active i::after { transform: translateX(16px); background: var(--accent); }
 .match-button span { display: flex; min-width: 0; flex-direction: column; gap: 5px; }
 .match-button b { font: 500 9px/1 "DM Mono", monospace; letter-spacing: .12em; }
+.match-button.level-button { padding: 13px 0 16px; border-top: 1px solid var(--line); }
 .relation-picker { margin: 0; }
 .relation { padding: 11px; border: 0; background: transparent; color: var(--muted); font: 500 8px/1 "DM Mono", monospace; letter-spacing: .15em; cursor: pointer; }
 .relation + .relation { border-left: 1px solid var(--line); }

@@ -8,6 +8,8 @@ Load multiple MP3, M4A, WAV, AAC, FLAC, or OGG files from the **Local Set** sect
 
 Tracks play in the displayed order and automatically advance. Use the arrow controls to reorder the set or remove individual files. The carrier glides to the analysed root or fifth at each transition. The main play button controls both the music and binaural layer; moving the base-carrier slider switches matching back to manual mode.
 
+Automatic matching uses a deliberately low carrier octave of roughly 92–175 Hz. Whole-track waveform analysis also maps quiet and silent passages before playback, allowing the binaural layer to duck smoothly when it would otherwise become exposed. Low-confidence key estimates retain the last reliable carrier instead of forcing a new pitch.
+
 ## Run locally
 
 No build step or dependencies are required. From this folder, start any static server:

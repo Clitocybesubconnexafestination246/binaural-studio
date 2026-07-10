@@ -1,21 +1,22 @@
 const presets = [
-  { name: "Deep Sleep", hz: 2.5, carrier: 110, levels: [0.95, .74, .48, .28, .16, .08, .04, .02, 0, 0] },
-  { name: "Dream Drift", hz: 4.5, carrier: 140, levels: [.9, .62, .76, .42, .26, .16, .1, .05, .02, 0] },
-  { name: "Meditation", hz: 6, carrier: 160, levels: [.78, .9, .56, .72, .38, .24, .14, .08, .04, .02] },
-  { name: "Calm", hz: 8, carrier: 180, levels: [.72, .9, .64, .48, .34, .24, .16, .1, .06, .03] },
-  { name: "Clear Mind", hz: 10, carrier: 200, levels: [.55, .74, .9, .62, .44, .3, .2, .12, .07, .04] },
-  { name: "Deep Focus", hz: 16, carrier: 220, levels: [.38, .52, .7, .92, .8, .58, .38, .24, .14, .08] },
-  { name: "Bright Alert", hz: 32, carrier: 260, levels: [.24, .36, .48, .64, .82, .94, .76, .55, .36, .18] }
+  { name: "Deep Sleep", hz: 2.5, carrier: 90, levels: [0.95, .74, .48, .28, .16, .08, .04, .02, 0, 0] },
+  { name: "Dream Drift", hz: 4.5, carrier: 105, levels: [.9, .62, .76, .42, .26, .16, .1, .05, .02, 0] },
+  { name: "Meditation", hz: 6, carrier: 120, levels: [.78, .9, .56, .72, .38, .24, .14, .08, .04, .02] },
+  { name: "Calm", hz: 8, carrier: 130, levels: [.72, .9, .64, .48, .34, .24, .16, .1, .06, .03] },
+  { name: "Clear Mind", hz: 10, carrier: 140, levels: [.55, .74, .9, .62, .44, .3, .2, .12, .07, .04] },
+  { name: "Deep Focus", hz: 16, carrier: 150, levels: [.38, .52, .7, .92, .8, .58, .38, .24, .14, .08] },
+  { name: "Bright Alert", hz: 32, carrier: 160, levels: [.24, .36, .48, .64, .82, .94, .76, .55, .36, .18] }
 ];
 
 const knobColors = ["#ff815d", "#f5a24b", "#e9c857", "#b8d967", "#68d598", "#54d5c4", "#59c0ea", "#7393f2", "#a579e8", "#dd79bb"];
-const state = { preset: 3, beat: 8, carrier: 180, volume: .35, wave: "sine", levels: [...presets[3].levels], playing: false, autoMatch: true, relation: 0 };
+const state = { preset: 3, beat: 8, carrier: 130, volume: .35, wave: "sine", levels: [...presets[3].levels], playing: false, autoMatch: true, autoLevel: true, toneScale: 1, relation: 0 };
 let audioContext, masterGain;
 const voices = [];
 let musicSource, musicGain;
 let detectedRoot = null;
 const playlist = [];
 let currentTrackIndex = -1, trackSequence = 0, isAnalysingSet = false;
+const KEY_CONFIDENCE_THRESHOLD = .22;
 
 const noteNames = ["C", "C♯", "D", "E♭", "E", "F", "F♯", "G", "A♭", "A", "B♭", "B"];
 const majorProfile = [6.35, 2.23, 3.48, 2.33, 4.38, 4.09, 2.52, 5.19, 2.39, 3.66, 2.29, 2.88];
@@ -145,7 +146,8 @@ async function togglePlay() {
   if (audioContext.state === "suspended") await audioContext.resume();
   state.playing = !state.playing;
   masterGain.gain.cancelScheduledValues(audioContext.currentTime);
-  masterGain.gain.setTargetAtTime(state.playing ? state.volume : 0, audioContext.currentTime, state.playing ? .12 : .06);
+  if (state.playing) applyDynamicToneLevel(true);
+  else masterGain.gain.setTargetAtTime(0, audioContext.currentTime, .06);
   document.body.classList.toggle("playing", state.playing);
   $("playButton").setAttribute("aria-pressed", String(state.playing));
   $("playButton").setAttribute("aria-label", state.playing ? "Pause audio" : "Start audio");
@@ -245,7 +247,9 @@ function renderPlaylist() {
 
     const status = document.createElement("span");
     status.className = `track-status${track.status === "analysing" ? " working" : ""}${track.status === "error" ? " error" : ""}`;
-    status.textContent = track.status === "analysed" ? `${Math.round(track.confidence * 100)}% CONF.` : track.status.toUpperCase();
+    status.textContent = track.status === "analysed"
+      ? `${Math.round(track.confidence * 100)}% · ${Math.round((track.envelope?.quietFraction || 0) * 100)}% QUIET`
+      : track.status.toUpperCase();
 
     const actions = document.createElement("div");
     actions.className = "row-actions";
@@ -295,6 +299,8 @@ function resetCurrentTrackUI() {
   $("keyConfidence").textContent = "WAITING FOR AUDIO";
   $("matchStatus").textContent = "LOAD A SET TO BEGIN";
   $("autoMatchButton").disabled = true;
+  $("autoLevelButton").disabled = true;
+  $("autoLevelStatus").textContent = "WAITING FOR WAVEFORM";
   $("trackPosition").disabled = true;
   $("timeline").classList.add("disabled");
   $("currentTime").textContent = "0:00";
@@ -331,6 +337,7 @@ async function selectTrack(index, autoplay = false) {
   $("trackMeta").textContent = `${(track.file.size / 1048576).toFixed(1)} MB · TRACK ${index + 1} OF ${playlist.length}`;
   $("trackMeta").style.color = "";
   $("autoMatchButton").disabled = false;
+  $("autoLevelButton").disabled = !track.envelope;
   $("trackPosition").disabled = false;
   $("timeline").classList.remove("disabled");
   if (track.tonic != null) setDetectedKey(track.tonic, track.key, track.confidence);
@@ -340,6 +347,7 @@ async function selectTrack(index, autoplay = false) {
     $("keyConfidence").textContent = track.status === "analysing" ? "BULK ANALYSIS IN PROGRESS" : "NOT YET ANALYSED";
     $("matchStatus").textContent = "ANALYSE SET BEFORE PLAYBACK";
   }
+  $("autoLevelStatus").textContent = track.envelope ? `READY · ${Math.round(track.envelope.quietFraction * 100)}% QUIET` : "ANALYSING WAVEFORM";
   if (audioContext) connectMusicSource();
   renderPlaylist();
   if (autoplay) {
@@ -436,7 +444,48 @@ async function analyseAudioBuffer(buffer) {
     }
     if (windowIndex % 3 === 2) await new Promise((resolve) => requestAnimationFrame(resolve));
   }
-  return rankKey(chroma);
+  const keyResult = rankKey(chroma);
+  const envelope = await analyseLoudnessEnvelope(buffer, channels);
+  return { ...keyResult, envelope };
+}
+
+async function analyseLoudnessEnvelope(buffer, channels) {
+  const pointsPerSecond = Math.max(.5, Math.min(4, 12000 / Math.max(1, buffer.duration)));
+  const pointCount = Math.max(1, Math.ceil(buffer.duration * pointsPerSecond));
+  const samplesPerPoint = buffer.sampleRate / pointsPerSecond;
+  const stride = Math.max(1, Math.floor(buffer.sampleRate / 1200));
+  const decibels = new Float32Array(pointCount);
+
+  for (let point = 0; point < pointCount; point++) {
+    const start = Math.floor(point * samplesPerPoint);
+    const end = Math.min(buffer.length, Math.floor((point + 1) * samplesPerPoint));
+    let energy = 0, samples = 0;
+    for (let sample = start; sample < end; sample += stride) {
+      let sampleEnergy = 0;
+      channels.forEach((channel) => {
+        const value = channel[sample] || 0;
+        sampleEnergy += value * value;
+      });
+      energy += sampleEnergy / channels.length;
+      samples += 1;
+    }
+    const rms = Math.sqrt(energy / Math.max(1, samples));
+    decibels[point] = 20 * Math.log10(Math.max(rms, 1e-6));
+    if (point % 240 === 239) await new Promise((resolve) => requestAnimationFrame(resolve));
+  }
+
+  const sorted = Array.from(decibels).sort((a, b) => a - b);
+  const percentile = (value) => sorted[Math.min(sorted.length - 1, Math.floor(sorted.length * value))];
+  const low = Math.max(-54, percentile(.12));
+  const high = Math.max(low + 8, percentile(.82));
+  const values = new Float32Array(pointCount);
+  let quietPoints = 0;
+  for (let point = 0; point < pointCount; point++) {
+    if (decibels[point] < -58) values[point] = 0;
+    else values[point] = Math.max(0, Math.min(1, (decibels[point] - low) / (high - low)));
+    if (values[point] < .16) quietPoints += 1;
+  }
+  return { values, pointsPerSecond, quietFraction: quietPoints / pointCount };
 }
 
 async function analyseSet(force = false) {
@@ -470,8 +519,13 @@ async function analyseSet(force = false) {
       track.tonic = result.tonic;
       track.mode = result.mode;
       track.confidence = result.confidence;
+      track.envelope = result.envelope;
       track.status = "analysed";
-      if (playlist[currentTrackIndex]?.id === track.id) setDetectedKey(track.tonic, track.key, track.confidence);
+      if (playlist[currentTrackIndex]?.id === track.id) {
+        setDetectedKey(track.tonic, track.key, track.confidence);
+        $("autoLevelButton").disabled = false;
+        $("autoLevelStatus").textContent = `READY · ${Math.round(track.envelope.quietFraction * 100)}% QUIET`;
+      }
     } catch (error) {
       track.status = "error";
       track.error = "Could not decode";
@@ -488,21 +542,47 @@ async function analyseSet(force = false) {
     const current = playlist[currentTrackIndex];
     setDetectedKey(current.tonic, current.key, current.confidence);
     $("duration").textContent = formatTime(current.duration);
+    applyDynamicToneLevel(true);
   }
   $("playStatus").textContent = playlist.every((track) => track.status === "analysed") ? "SET READY" : "CHECK FILES";
 }
 
 function setDetectedKey(root, label, confidence) {
   const changed = $("detectedKey").textContent !== label;
-  detectedRoot = root;
   $("detectedKey").textContent = label;
-  $("keyConfidence").textContent = `${Math.round(confidence * 100)}% CONFIDENCE · PRE-ANALYSED`;
+  const reliable = confidence >= KEY_CONFIDENCE_THRESHOLD;
+  detectedRoot = reliable ? root : null;
+  $("keyConfidence").textContent = `${Math.round(confidence * 100)}% CONFIDENCE · ${reliable ? "KEY LOCKED" : "LOW · CARRIER HELD"}`;
   if (changed) {
     const display = document.querySelector(".key-display");
     display.classList.remove("key-change");
     requestAnimationFrame(() => display.classList.add("key-change"));
   }
-  if (state.autoMatch) matchCarrierToKey();
+  if (state.autoMatch && reliable) matchCarrierToKey();
+  else if (state.autoMatch) $("matchStatus").textContent = `HELD AT ${state.carrier.toFixed(1)} HZ`;
+}
+
+function currentToneScale() {
+  const track = playlist[currentTrackIndex];
+  if (!state.autoLevel || !track?.envelope?.values?.length) return 1;
+  const envelopeIndex = Math.min(track.envelope.values.length - 1, Math.floor($("musicPlayer").currentTime * track.envelope.pointsPerSecond));
+  const loudness = track.envelope.values[envelopeIndex];
+  const maskingScale = loudness < .03 ? .06 : .16 + .84 * Math.pow(loudness, .72);
+  const confidenceScale = track.confidence < KEY_CONFIDENCE_THRESHOLD
+    ? .55 + .2 * (track.confidence / KEY_CONFIDENCE_THRESHOLD)
+    : 1;
+  return Math.max(.03, Math.min(1, maskingScale * confidenceScale));
+}
+
+function applyDynamicToneLevel(immediate = false) {
+  state.toneScale = currentToneScale();
+  const percentage = Math.round(state.toneScale * 100);
+  const track = playlist[currentTrackIndex];
+  const reason = state.toneScale < .12 ? "SILENCE DUCK" : state.toneScale < .55 ? "QUIET PASSAGE" : track?.confidence < KEY_CONFIDENCE_THRESHOLD ? "LOW KEY CONFIDENCE" : "MUSIC MASKING";
+  $("autoLevelStatus").textContent = state.autoLevel ? `${percentage}% · ${reason}` : "FIXED OUTPUT";
+  if (audioContext && state.playing) {
+    masterGain.gain.setTargetAtTime(state.volume * state.toneScale, audioContext.currentTime, immediate ? .03 : .14);
+  }
 }
 
 function matchCarrierToKey() {
@@ -510,8 +590,8 @@ function matchCarrierToKey() {
   const pitchClass = (detectedRoot + state.relation) % 12;
   const currentMidi = 69 + 12 * Math.log2(state.carrier / 440);
   const candidates = [];
-  // E3–F4 keeps matching in the low, clearly perceived binaural range.
-  for (let midi = 52; midi <= 65; midi++) {
+  // F♯2–F3 covers every pitch class while keeping the carrier low in the mix.
+  for (let midi = 42; midi <= 53; midi++) {
     if (((midi % 12) + 12) % 12 === pitchClass) candidates.push(midi);
   }
   const selected = candidates.reduce((best, midi) => Math.abs(midi - currentMidi) < Math.abs(best - currentMidi) ? midi : best, candidates[0]);
@@ -541,7 +621,7 @@ $("carrierFrequency").addEventListener("input", (event) => {
 $("masterVolume").addEventListener("input", (event) => {
   state.volume = Number(event.target.value);
   $("volumeValue").textContent = `${Math.round(state.volume * 100)}%`;
-  if (audioContext && state.playing) masterGain.gain.setTargetAtTime(state.volume, audioContext.currentTime, .06);
+  if (audioContext && state.playing) applyDynamicToneLevel(true);
 });
 
 $("audioFile").addEventListener("change", (event) => {
@@ -597,6 +677,7 @@ $("musicPlayer").addEventListener("error", () => {
 $("musicPlayer").addEventListener("timeupdate", () => {
   $("currentTime").textContent = formatTime($("musicPlayer").currentTime);
   if (!$("trackPosition").matches(":active")) $("trackPosition").value = $("musicPlayer").currentTime;
+  applyDynamicToneLevel();
 });
 $("musicPlayer").addEventListener("ended", () => {
   if (!state.playing) return;
@@ -623,6 +704,12 @@ $("autoMatchButton").addEventListener("click", () => {
   $("autoMatchButton").setAttribute("aria-pressed", String(state.autoMatch));
   $("matchStatus").textContent = state.autoMatch ? (detectedRoot == null ? "AWAITING ANALYSIS" : "MATCHING ANALYSED KEY") : "MANUAL CARRIER";
   if (state.autoMatch) matchCarrierToKey();
+});
+$("autoLevelButton").addEventListener("click", () => {
+  state.autoLevel = !state.autoLevel;
+  $("autoLevelButton").classList.toggle("active", state.autoLevel);
+  $("autoLevelButton").setAttribute("aria-pressed", String(state.autoLevel));
+  applyDynamicToneLevel(true);
 });
 document.querySelectorAll(".relation").forEach((button) => button.addEventListener("click", () => {
   state.relation = Number(button.dataset.relation);
