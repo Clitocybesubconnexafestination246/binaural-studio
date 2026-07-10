@@ -104,6 +104,7 @@
               <input id="audioFile" type="file" accept="audio/*,.mp3,.m4a,.wav,.aac,.flac,.ogg" multiple hidden />
               <label class="load-button" for="audioFile"><span>＋</span> ADD FILES</label>
               <button class="set-button" id="analyseSetButton" disabled>ANALYSE SET</button>
+              <button class="set-button" id="sortKeyButton" disabled>SORT BY KEY</button>
               <button class="set-button quiet" id="clearSetButton" disabled>CLEAR</button>
             </div>
           </div>
@@ -142,15 +143,18 @@
             <input id="trackPosition" type="range" min="0" max="100" value="0" step="0.1" aria-label="Track position" disabled />
             <span id="duration">0:00</span>
             <label for="musicVolume">MUSIC <input id="musicVolume" type="range" min="0" max="1" value="0.8" step="0.01" /></label>
+            <button class="timeline-toggle active" id="crossfadeButton" aria-pressed="true"><i></i><span>AUTO XFADE</span></button>
+            <label for="crossfadeSeconds">TIME <input id="crossfadeSeconds" type="range" min="2" max="12" value="6" step="1" /><small id="crossfadeValue">6s</small></label>
           </div>
 
           <div class="playlist-head" aria-hidden="true">
-            <span>ORDER</span><span>TRACK</span><span>KEY</span><span>TIME</span><span>STATUS</span><span></span>
+            <span>ORDER</span><span>TRACK</span><span>KEY</span><span>TIME</span><span>ANALYSIS</span><span>STATE CUE</span><span></span>
           </div>
           <div class="playlist" id="playlist" aria-label="Local set">
             <div class="playlist-empty">Your ordered set will appear here.</div>
           </div>
           <audio id="musicPlayer" preload="metadata"></audio>
+          <audio id="musicPlayerB" preload="metadata"></audio>
         </div>
       </section>
     </main>

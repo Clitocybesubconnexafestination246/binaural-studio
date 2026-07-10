@@ -9,10 +9,11 @@ const presets = [
 ];
 
 const knobColors = ["#ff815d", "#f5a24b", "#e9c857", "#b8d967", "#68d598", "#54d5c4", "#59c0ea", "#7393f2", "#a579e8", "#dd79bb"];
-const state = { preset: 3, beat: 8, carrier: 130, volume: .35, wave: "sine", levels: [...presets[3].levels], playing: false, autoMatch: true, autoLevel: true, toneScale: 1, relation: 0 };
+const state = { preset: 3, beat: 8, carrier: 130, volume: .35, wave: "sine", levels: [...presets[3].levels], playing: false, autoMatch: true, autoLevel: true, toneScale: 1, relation: 0, crossfade: true, crossfadeSeconds: 6 };
 let audioContext, masterGain;
 const voices = [];
-let musicSource, musicGain;
+const musicSources = [], musicGains = [];
+let activeDeck = 0, crossfadeInProgress = false, crossfadeTimer;
 let detectedRoot = null;
 const playlist = [];
 let currentTrackIndex = -1, trackSequence = 0, isAnalysingSet = false;
@@ -25,6 +26,9 @@ const minorProfile = [6.33, 2.68, 3.52, 5.38, 2.60, 3.53, 2.54, 4.75, 3.98, 2.69
 const $ = (id) => document.getElementById(id);
 const mixer = $("mixer");
 const presetList = $("presetList");
+const deckPlayers = () => [$("musicPlayer"), $("musicPlayerB")];
+const activePlayer = () => deckPlayers()[activeDeck];
+const standbyPlayer = () => deckPlayers()[1 - activeDeck];
 
 function waveBand(hz) {
   if (hz < 4) return "DELTA";
@@ -72,7 +76,7 @@ function createAudio() {
   masterGain.gain.value = 0;
   masterGain.connect(audioContext.destination);
 
-  if ($("musicPlayer").src) connectMusicSource();
+  connectMusicSources();
 
   for (let i = 0; i < 10; i++) {
     const left = audioContext.createOscillator();
@@ -92,12 +96,23 @@ function createAudio() {
   return true;
 }
 
-function connectMusicSource() {
-  if (!audioContext || musicSource) return;
-  musicSource = audioContext.createMediaElementSource($("musicPlayer"));
-  musicGain = audioContext.createGain();
-  musicGain.gain.value = Number($("musicVolume").value);
-  musicSource.connect(musicGain).connect(audioContext.destination);
+function connectMusicSources() {
+  if (!audioContext || musicSources.length) return;
+  deckPlayers().forEach((player, deck) => {
+    const source = audioContext.createMediaElementSource(player);
+    const gain = audioContext.createGain();
+    gain.gain.value = deck === activeDeck ? Number($("musicVolume").value) : 0;
+    source.connect(gain).connect(audioContext.destination);
+    musicSources.push(source);
+    musicGains.push(gain);
+  });
+}
+
+function setDeckGain(deck, value, glide = .04) {
+  if (!audioContext || !musicGains[deck]) return;
+  const parameter = musicGains[deck].gain;
+  parameter.cancelScheduledValues(audioContext.currentTime);
+  parameter.setTargetAtTime(value, audioContext.currentTime, glide);
 }
 
 function harmonicFrequency(index) {
@@ -145,18 +160,22 @@ async function togglePlay() {
   }
   if (audioContext.state === "suspended") await audioContext.resume();
   state.playing = !state.playing;
+  if (state.playing && playlist[currentTrackIndex]) applyTrackCue(playlist[currentTrackIndex]);
   masterGain.gain.cancelScheduledValues(audioContext.currentTime);
   if (state.playing) applyDynamicToneLevel(true);
   else masterGain.gain.setTargetAtTime(0, audioContext.currentTime, .06);
   document.body.classList.toggle("playing", state.playing);
+  $("sortKeyButton").disabled = state.playing || playlist.length < 2 || playlist.some((track) => track.status !== "analysed");
   $("playButton").setAttribute("aria-pressed", String(state.playing));
   $("playButton").setAttribute("aria-label", state.playing ? "Pause audio" : "Start audio");
   $("playStatus").textContent = state.playing && playlist.length ? `PLAYING ${currentTrackIndex + 1}/${playlist.length}` : state.playing ? "PLAYING" : "PAUSED";
-  if ($("musicPlayer").src) {
+  if (activePlayer().src) {
     if (state.playing) {
-      try { await $("musicPlayer").play(); } catch (error) { console.warn("The local track could not start", error); }
+      try { await activePlayer().play(); } catch (error) { console.warn("The local track could not start", error); }
     } else {
-      $("musicPlayer").pause();
+      activePlayer().pause();
+      standbyPlayer().pause();
+      if (crossfadeInProgress) cancelCrossfade();
     }
   }
 }
@@ -207,6 +226,7 @@ function updateSetSummary() {
   $("setSummary").textContent = `${playlist.length} TRACK${playlist.length === 1 ? "" : "S"} · ${analysed} ANALYSED · ON-DEVICE`;
   $("analyseSetButton").disabled = playlist.length === 0 || isAnalysingSet;
   $("clearSetButton").disabled = playlist.length === 0 || isAnalysingSet;
+  $("sortKeyButton").disabled = playlist.length < 2 || isAnalysingSet || state.playing || playlist.some((track) => track.status !== "analysed");
 }
 
 function renderPlaylist() {
@@ -251,6 +271,22 @@ function renderPlaylist() {
       ? `${Math.round(track.confidence * 100)}% · ${Math.round((track.envelope?.quietFraction || 0) * 100)}% QUIET`
       : track.status.toUpperCase();
 
+    const presetCue = document.createElement("select");
+    presetCue.className = `preset-cue${track.presetOverride != null ? " cued" : ""}`;
+    presetCue.setAttribute("aria-label", `State cue for ${track.name}`);
+    [{ label: "CONTINUE", value: "" }, ...presets.map((preset, presetIndex) => ({ label: preset.name.toUpperCase(), value: String(presetIndex) }))].forEach((optionData) => {
+      const option = document.createElement("option");
+      option.value = optionData.value;
+      option.textContent = optionData.label;
+      option.selected = track.presetOverride == null ? optionData.value === "" : optionData.value === String(track.presetOverride);
+      presetCue.appendChild(option);
+    });
+    presetCue.addEventListener("change", () => {
+      track.presetOverride = presetCue.value === "" ? null : Number(presetCue.value);
+      presetCue.classList.toggle("cued", track.presetOverride != null);
+      if (index === currentTrackIndex && state.playing && track.presetOverride != null) applyTrackCue(track);
+    });
+
     const actions = document.createElement("div");
     actions.className = "row-actions";
     [
@@ -267,7 +303,7 @@ function renderPlaylist() {
       actions.appendChild(button);
     });
 
-    row.append(order, title, key, time, status, actions);
+    row.append(order, title, key, time, status, presetCue, actions);
     container.appendChild(row);
   });
   updateSetSummary();
@@ -286,11 +322,49 @@ function moveTrack(index, direction) {
   renderPlaylist();
 }
 
+function harmonicDistance(from, to) {
+  if (from.tonic == null || to.tonic == null || from.confidence < KEY_CONFIDENCE_THRESHOLD || to.confidence < KEY_CONFIDENCE_THRESHOLD) return 100;
+  if (from.mode !== to.mode) {
+    const relative = from.mode === "MAJOR" ? (from.tonic + 9) % 12 : (from.tonic + 3) % 12;
+    if (relative === to.tonic) return .2;
+  }
+  const circle = [0, 7, 2, 9, 4, 11, 6, 1, 8, 3, 10, 5];
+  const fromPosition = circle.indexOf(from.tonic), toPosition = circle.indexOf(to.tonic);
+  const steps = Math.abs(fromPosition - toPosition);
+  return Math.min(steps, 12 - steps) + (from.mode === to.mode ? 0 : .35);
+}
+
+function sortPlaylistByKey() {
+  if (playlist.length < 2 || state.playing || isAnalysingSet) return;
+  const currentId = playlist[currentTrackIndex]?.id;
+  const reliable = playlist.filter((track) => track.tonic != null && track.confidence >= KEY_CONFIDENCE_THRESHOLD);
+  const uncertain = playlist.filter((track) => track.tonic == null || track.confidence < KEY_CONFIDENCE_THRESHOLD);
+  if (!reliable.length) return;
+  const remaining = reliable.slice(1);
+  const ordered = [reliable[0]];
+  while (remaining.length) {
+    const previous = ordered[ordered.length - 1];
+    let bestIndex = 0, bestDistance = Infinity;
+    remaining.forEach((track, index) => {
+      const distance = harmonicDistance(previous, track);
+      if (distance < bestDistance) { bestDistance = distance; bestIndex = index; }
+    });
+    ordered.push(remaining.splice(bestIndex, 1)[0]);
+  }
+  playlist.splice(0, playlist.length, ...ordered, ...uncertain);
+  currentTrackIndex = playlist.findIndex((track) => track.id === currentId);
+  if (currentTrackIndex >= 0) presentTrack(currentTrackIndex);
+  renderPlaylist();
+}
+
 function resetCurrentTrackUI() {
   currentTrackIndex = -1;
-  $("musicPlayer").pause();
-  $("musicPlayer").removeAttribute("src");
-  $("musicPlayer").load();
+  cancelCrossfade();
+  deckPlayers().forEach((player) => {
+    player.pause();
+    player.removeAttribute("src");
+    player.load();
+  });
   $("nowIndex").textContent = "—";
   $("trackName").textContent = "No track loaded";
   $("trackMeta").textContent = "ADD LOCAL AUDIO FILES TO BUILD A SET";
@@ -325,13 +399,15 @@ function removeTrack(index) {
   renderPlaylist();
 }
 
-async function selectTrack(index, autoplay = false) {
+function applyTrackCue(track) {
+  if (track.presetOverride != null) applyPreset(track.presetOverride);
+  if (track.tonic != null) setDetectedKey(track.tonic, track.key, track.confidence);
+}
+
+function presentTrack(index) {
   const track = playlist[index];
   if (!track) return;
   currentTrackIndex = index;
-  const player = $("musicPlayer");
-  player.src = track.url;
-  player.load();
   $("nowIndex").textContent = String(index + 1).padStart(2, "0");
   $("trackName").textContent = track.name;
   $("trackMeta").textContent = `${(track.file.size / 1048576).toFixed(1)} MB · TRACK ${index + 1} OF ${playlist.length}`;
@@ -340,19 +416,95 @@ async function selectTrack(index, autoplay = false) {
   $("autoLevelButton").disabled = !track.envelope;
   $("trackPosition").disabled = false;
   $("timeline").classList.remove("disabled");
-  if (track.tonic != null) setDetectedKey(track.tonic, track.key, track.confidence);
-  else {
+  if (track.tonic == null) {
     detectedRoot = null;
     $("detectedKey").textContent = "…";
     $("keyConfidence").textContent = track.status === "analysing" ? "BULK ANALYSIS IN PROGRESS" : "NOT YET ANALYSED";
     $("matchStatus").textContent = "ANALYSE SET BEFORE PLAYBACK";
   }
   $("autoLevelStatus").textContent = track.envelope ? `READY · ${Math.round(track.envelope.quietFraction * 100)}% QUIET` : "ANALYSING WAVEFORM";
-  if (audioContext) connectMusicSource();
+  if (state.playing) applyTrackCue(track);
+  else if (track.tonic != null) setDetectedKey(track.tonic, track.key, track.confidence);
+  applyDynamicToneLevel(true);
   renderPlaylist();
+}
+
+function cancelCrossfade() {
+  clearTimeout(crossfadeTimer);
+  crossfadeInProgress = false;
+  const standby = standbyPlayer();
+  standby.pause();
+  standby.removeAttribute("src");
+  standby.load();
+  setDeckGain(activeDeck, Number($("musicVolume").value), .03);
+  setDeckGain(1 - activeDeck, 0, .03);
+}
+
+async function selectTrack(index, autoplay = false) {
+  const track = playlist[index];
+  if (!track) return;
+  cancelCrossfade();
+  const player = activePlayer();
+  player.pause();
+  player.src = track.url;
+  player.load();
+  presentTrack(index);
   if (autoplay) {
     try { await player.play(); } catch (error) { console.warn("The next local track could not start", error); }
   }
+}
+
+async function startCrossfade() {
+  const nextIndex = currentTrackIndex + 1;
+  if (!state.crossfade || crossfadeInProgress || nextIndex >= playlist.length || playlist[nextIndex].status !== "analysed") return;
+  const nextDeck = 1 - activeDeck;
+  const nextPlayer = deckPlayers()[nextDeck];
+  nextPlayer.src = playlist[nextIndex].url;
+  nextPlayer.currentTime = 0;
+  nextPlayer.load();
+  setDeckGain(nextDeck, 0, .01);
+  try { await nextPlayer.play(); }
+  catch (error) { console.warn("Crossfade could not start", error); return; }
+
+  crossfadeInProgress = true;
+  const now = audioContext.currentTime;
+  const duration = state.crossfadeSeconds;
+  const targetVolume = Number($("musicVolume").value);
+  [activeDeck, nextDeck].forEach((deck) => musicGains[deck].gain.cancelScheduledValues(now));
+  const curveSteps = 64;
+  const fadeOut = new Float32Array(curveSteps), fadeIn = new Float32Array(curveSteps);
+  const currentVolume = Math.max(0, musicGains[activeDeck].gain.value);
+  for (let step = 0; step < curveSteps; step++) {
+    const progress = step / (curveSteps - 1);
+    fadeOut[step] = Math.cos(progress * Math.PI / 2) * currentVolume;
+    fadeIn[step] = Math.sin(progress * Math.PI / 2) * targetVolume;
+  }
+  musicGains[activeDeck].gain.setValueCurveAtTime(fadeOut, now, duration);
+  musicGains[nextDeck].gain.setValueCurveAtTime(fadeIn, now, duration);
+  $("playStatus").textContent = `CROSSFADE ${currentTrackIndex + 1}→${nextIndex + 1}`;
+  crossfadeTimer = setTimeout(finishCrossfade, duration * 1000);
+}
+
+function finishCrossfade() {
+  if (!crossfadeInProgress) return;
+  const previousDeck = activeDeck;
+  deckPlayers()[previousDeck].pause();
+  deckPlayers()[previousDeck].removeAttribute("src");
+  deckPlayers()[previousDeck].load();
+  activeDeck = 1 - activeDeck;
+  currentTrackIndex += 1;
+  crossfadeInProgress = false;
+  clearTimeout(crossfadeTimer);
+  setDeckGain(previousDeck, 0, .01);
+  setDeckGain(activeDeck, Number($("musicVolume").value), .03);
+  presentTrack(currentTrackIndex);
+  $("playStatus").textContent = `PLAYING ${currentTrackIndex + 1}/${playlist.length}`;
+}
+
+function maybeStartCrossfade() {
+  if (!state.playing || !state.crossfade || crossfadeInProgress) return;
+  const player = activePlayer();
+  if (Number.isFinite(player.duration) && player.duration - player.currentTime <= state.crossfadeSeconds && player.duration - player.currentTime > .15) startCrossfade();
 }
 
 function profileScore(chroma, profile, tonic) {
@@ -485,7 +637,30 @@ async function analyseLoudnessEnvelope(buffer, channels) {
     else values[point] = Math.max(0, Math.min(1, (decibels[point] - low) / (high - low)));
     if (values[point] < .16) quietPoints += 1;
   }
-  return { values, pointsPerSecond, quietFraction: quietPoints / pointCount };
+
+  // Build a slow, look-ahead bed: brief gaps and stutters inherit nearby energy,
+  // while sustained silence only lowers the tone to a constant-presence floor.
+  const radius = Math.max(1, Math.ceil(pointsPerSecond * 2.5));
+  const desired = new Float32Array(pointCount);
+  for (let point = 0; point < pointCount; point++) {
+    let peak = 0, sum = 0, count = 0;
+    for (let nearby = Math.max(0, point - radius); nearby <= Math.min(pointCount - 1, point + radius); nearby++) {
+      peak = Math.max(peak, values[nearby]);
+      sum += values[nearby];
+      count += 1;
+    }
+    const contextualEnergy = peak * .68 + (sum / count) * .32;
+    desired[point] = .62 + .38 * Math.pow(contextualEnergy, .65);
+  }
+  const forward = new Float32Array(pointCount), backward = new Float32Array(pointCount);
+  const smoothing = 1 - Math.exp(-1 / Math.max(1, pointsPerSecond * 2.2));
+  forward[0] = desired[0];
+  for (let point = 1; point < pointCount; point++) forward[point] = forward[point - 1] + smoothing * (desired[point] - forward[point - 1]);
+  backward[pointCount - 1] = desired[pointCount - 1];
+  for (let point = pointCount - 2; point >= 0; point--) backward[point] = backward[point + 1] + smoothing * (desired[point] - backward[point + 1]);
+  const toneValues = new Float32Array(pointCount);
+  for (let point = 0; point < pointCount; point++) toneValues[point] = (forward[point] + backward[point]) / 2;
+  return { values, toneValues, pointsPerSecond, quietFraction: quietPoints / pointCount };
 }
 
 async function analyseSet(force = false) {
@@ -564,24 +739,23 @@ function setDetectedKey(root, label, confidence) {
 
 function currentToneScale() {
   const track = playlist[currentTrackIndex];
-  if (!state.autoLevel || !track?.envelope?.values?.length) return 1;
-  const envelopeIndex = Math.min(track.envelope.values.length - 1, Math.floor($("musicPlayer").currentTime * track.envelope.pointsPerSecond));
-  const loudness = track.envelope.values[envelopeIndex];
-  const maskingScale = loudness < .03 ? .06 : .16 + .84 * Math.pow(loudness, .72);
+  if (!state.autoLevel || !track?.envelope?.toneValues?.length) return 1;
+  const envelopeIndex = Math.min(track.envelope.toneValues.length - 1, Math.floor(activePlayer().currentTime * track.envelope.pointsPerSecond));
+  const maskingScale = track.envelope.toneValues[envelopeIndex];
   const confidenceScale = track.confidence < KEY_CONFIDENCE_THRESHOLD
-    ? .55 + .2 * (track.confidence / KEY_CONFIDENCE_THRESHOLD)
+    ? .82 + .18 * (track.confidence / KEY_CONFIDENCE_THRESHOLD)
     : 1;
-  return Math.max(.03, Math.min(1, maskingScale * confidenceScale));
+  return Math.max(.5, Math.min(1, maskingScale * confidenceScale));
 }
 
 function applyDynamicToneLevel(immediate = false) {
   state.toneScale = currentToneScale();
   const percentage = Math.round(state.toneScale * 100);
   const track = playlist[currentTrackIndex];
-  const reason = state.toneScale < .12 ? "SILENCE DUCK" : state.toneScale < .55 ? "QUIET PASSAGE" : track?.confidence < KEY_CONFIDENCE_THRESHOLD ? "LOW KEY CONFIDENCE" : "MUSIC MASKING";
+  const reason = track?.confidence < KEY_CONFIDENCE_THRESHOLD ? "LOW CONFIDENCE BED" : state.toneScale < .72 ? "QUIET BED" : "CONSTANT BED";
   $("autoLevelStatus").textContent = state.autoLevel ? `${percentage}% · ${reason}` : "FIXED OUTPUT";
   if (audioContext && state.playing) {
-    masterGain.gain.setTargetAtTime(state.volume * state.toneScale, audioContext.currentTime, immediate ? .03 : .14);
+    masterGain.gain.setTargetAtTime(state.volume * state.toneScale, audioContext.currentTime, immediate ? .08 : .85);
   }
 }
 
@@ -636,6 +810,7 @@ $("audioFile").addEventListener("change", (event) => {
     key: "",
     tonic: null,
     confidence: 0,
+    presetOverride: null,
     status: "queued"
   }));
   event.target.value = "";
@@ -645,10 +820,11 @@ $("audioFile").addEventListener("change", (event) => {
 });
 
 $("analyseSetButton").addEventListener("click", () => analyseSet(true));
+$("sortKeyButton").addEventListener("click", sortPlaylistByKey);
 $("clearSetButton").addEventListener("click", () => {
-  if (state.playing && $("musicPlayer").src) {
+  if (state.playing && activePlayer().src) {
     state.playing = false;
-    $("musicPlayer").pause();
+    deckPlayers().forEach((player) => player.pause());
     if (audioContext) masterGain.gain.setTargetAtTime(0, audioContext.currentTime, .06);
     document.body.classList.remove("playing");
     $("playButton").setAttribute("aria-pressed", "false");
@@ -661,42 +837,62 @@ $("clearSetButton").addEventListener("click", () => {
   $("playStatus").textContent = "READY";
 });
 
-$("musicPlayer").addEventListener("loadedmetadata", () => {
-  $("duration").textContent = formatTime($("musicPlayer").duration);
-  $("trackPosition").max = $("musicPlayer").duration || 100;
-  const current = playlist[currentTrackIndex];
-  if (current && !current.duration) { current.duration = $("musicPlayer").duration; renderPlaylist(); }
+deckPlayers().forEach((player) => {
+  player.addEventListener("loadedmetadata", () => {
+    if (player !== activePlayer()) return;
+    $("duration").textContent = formatTime(player.duration);
+    $("trackPosition").max = player.duration || 100;
+    const current = playlist[currentTrackIndex];
+    if (current && !current.duration) { current.duration = player.duration; renderPlaylist(); }
+  });
+  player.addEventListener("error", () => {
+    if (player !== activePlayer()) return;
+    $("trackMeta").textContent = "THIS AUDIO FORMAT COULD NOT BE DECODED BY THE BROWSER";
+    $("trackMeta").style.color = "#ff815d";
+    $("playStatus").textContent = "FILE ERROR";
+    const current = playlist[currentTrackIndex];
+    if (current && current.status !== "analysing") { current.status = "error"; renderPlaylist(); }
+  });
+  player.addEventListener("timeupdate", () => {
+    if (player !== activePlayer()) return;
+    $("currentTime").textContent = formatTime(player.currentTime);
+    if (!$("trackPosition").matches(":active")) $("trackPosition").value = player.currentTime;
+    applyDynamicToneLevel();
+    maybeStartCrossfade();
+  });
+  player.addEventListener("ended", () => {
+    if (player !== activePlayer() || !state.playing) return;
+    if (crossfadeInProgress) { finishCrossfade(); return; }
+    const nextIndex = currentTrackIndex + 1;
+    if (nextIndex < playlist.length && playlist[nextIndex].status === "analysed") {
+      selectTrack(nextIndex, true);
+      $("playStatus").textContent = `PLAYING ${nextIndex + 1}/${playlist.length}`;
+      return;
+    }
+    state.playing = false;
+    if (audioContext) masterGain.gain.setTargetAtTime(0, audioContext.currentTime, .06);
+    document.body.classList.remove("playing");
+    $("playButton").setAttribute("aria-pressed", "false");
+    $("playButton").setAttribute("aria-label", "Start audio");
+    $("playStatus").textContent = "FINISHED";
+  });
 });
-$("musicPlayer").addEventListener("error", () => {
-  $("trackMeta").textContent = "THIS AUDIO FORMAT COULD NOT BE DECODED BY THE BROWSER";
-  $("trackMeta").style.color = "#ff815d";
-  $("playStatus").textContent = "FILE ERROR";
-  const current = playlist[currentTrackIndex];
-  if (current && current.status !== "analysing") { current.status = "error"; renderPlaylist(); }
+$("trackPosition").addEventListener("input", (event) => {
+  if (crossfadeInProgress) cancelCrossfade();
+  activePlayer().currentTime = Number(event.target.value);
 });
-$("musicPlayer").addEventListener("timeupdate", () => {
-  $("currentTime").textContent = formatTime($("musicPlayer").currentTime);
-  if (!$("trackPosition").matches(":active")) $("trackPosition").value = $("musicPlayer").currentTime;
-  applyDynamicToneLevel();
-});
-$("musicPlayer").addEventListener("ended", () => {
-  if (!state.playing) return;
-  const nextIndex = currentTrackIndex + 1;
-  if (nextIndex < playlist.length && playlist[nextIndex].status === "analysed") {
-    selectTrack(nextIndex, true);
-    $("playStatus").textContent = `PLAYING ${nextIndex + 1}/${playlist.length}`;
-    return;
-  }
-  state.playing = false;
-  if (audioContext) masterGain.gain.setTargetAtTime(0, audioContext.currentTime, .06);
-  document.body.classList.remove("playing");
-  $("playButton").setAttribute("aria-pressed", "false");
-  $("playButton").setAttribute("aria-label", "Start audio");
-  $("playStatus").textContent = "FINISHED";
-});
-$("trackPosition").addEventListener("input", (event) => { $("musicPlayer").currentTime = Number(event.target.value); });
 $("musicVolume").addEventListener("input", (event) => {
-  if (musicGain && audioContext) musicGain.gain.setTargetAtTime(Number(event.target.value), audioContext.currentTime, .04);
+  if (!crossfadeInProgress) setDeckGain(activeDeck, Number(event.target.value), .04);
+});
+$("crossfadeButton").addEventListener("click", () => {
+  state.crossfade = !state.crossfade;
+  $("crossfadeButton").classList.toggle("active", state.crossfade);
+  $("crossfadeButton").setAttribute("aria-pressed", String(state.crossfade));
+  if (!state.crossfade && crossfadeInProgress) cancelCrossfade();
+});
+$("crossfadeSeconds").addEventListener("input", (event) => {
+  state.crossfadeSeconds = Number(event.target.value);
+  $("crossfadeValue").textContent = `${state.crossfadeSeconds}s`;
 });
 $("autoMatchButton").addEventListener("click", () => {
   state.autoMatch = !state.autoMatch;

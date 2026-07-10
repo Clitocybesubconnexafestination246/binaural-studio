@@ -10,6 +10,10 @@ Tracks play in the displayed order and automatically advance. Use the arrow cont
 
 Automatic matching uses a deliberately low carrier octave of roughly 92–175 Hz. Whole-track waveform analysis also maps quiet and silent passages before playback, allowing the binaural layer to duck smoothly when it would otherwise become exposed. Low-confidence key estimates retain the last reliable carrier instead of forcing a new pitch.
 
+The adaptive layer is intentionally a constant bed rather than a reactive gate: it uses several seconds of look-ahead context, slow bidirectional smoothing, and a 50% minimum output floor. Brief dance-music builds, stutters, and drops therefore retain the tone instead of producing rapid pumping.
+
+Use **Sort by key** to build a harmonically adjacent running order; uncertain key results are left at the end. **Auto Xfade** overlaps two local playback decks for adjustable 2–12 second transitions. Each playlist row also has a state cue: choose a preset such as Calm or Deep Focus and it will take effect when that track begins, persisting through later tracks marked Continue until another cue changes it.
+
 ## Run locally
 
 No build step or dependencies are required. From this folder, start any static server:
