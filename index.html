@@ -1,0 +1,109 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <meta name="theme-color" content="#090907" />
+    <meta
+      name="description"
+      content="A tactile, browser-based binaural beat generator with harmonic mixing and brainwave presets."
+    />
+    <title>Phase — Binaural Studio</title>
+    <link rel="preconnect" href="https://fonts.googleapis.com" />
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+    <link href="https://fonts.googleapis.com/css2?family=DM+Mono:wght@300;400;500&family=Manrope:wght@400;500;600&display=swap" rel="stylesheet" />
+    <link rel="stylesheet" href="styles.css" />
+  </head>
+  <body>
+    <canvas id="field" aria-hidden="true"></canvas>
+    <div class="grain" aria-hidden="true"></div>
+
+    <header class="topbar">
+      <a class="brand" href="#" aria-label="Phase home">
+        <span class="brand-mark" aria-hidden="true"><i></i><i></i></span>
+        <span>PHASE</span>
+      </a>
+      <div class="headphone-note"><span>◖</span> HEADPHONES REQUIRED <span>◗</span></div>
+      <button class="icon-button" id="infoButton" aria-label="About binaural beats">?</button>
+    </header>
+
+    <main>
+      <section class="studio" aria-labelledby="pageTitle">
+        <div class="title-lockup">
+          <p class="eyebrow">BINAURAL STUDIO / 01</p>
+          <h1 id="pageTitle">Tune your state.</h1>
+          <p class="dek">Two tones. One perceived rhythm. Shape a private field of focus, rest, or stillness.</p>
+        </div>
+
+        <div class="frequency-readout" aria-live="polite">
+          <span id="stateName">CALM</span>
+          <strong><span id="beatReadout">8.0</span><small> Hz</small></strong>
+          <span id="waveName">ALPHA</span>
+        </div>
+
+        <div class="mixer-wrap">
+          <div class="scale-labels" aria-hidden="true"><span>+6</span><span>0</span><span>−∞</span></div>
+          <div class="mixer" id="mixer" aria-label="Harmonic mixer"></div>
+        </div>
+
+        <div class="transport">
+          <button class="play-button" id="playButton" aria-label="Start audio" aria-pressed="false">
+            <span class="play-icon" aria-hidden="true"></span>
+            <span class="pause-icon" aria-hidden="true"><i></i><i></i></span>
+          </button>
+          <div class="transport-status">
+            <span id="playStatus">READY</span>
+            <div class="meter" aria-hidden="true"><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i></div>
+          </div>
+          <button class="utility-button" id="shuffleButton" title="Gently randomize harmonic levels">↝ <span>DRIFT</span></button>
+          <button class="utility-button" id="resetButton" title="Reset the current preset">↺ <span>RESET</span></button>
+        </div>
+      </section>
+
+      <section class="controls" aria-label="Sound controls">
+        <div class="presets-block">
+          <div class="section-heading">
+            <p class="eyebrow">QUICK STATES</p>
+            <span>01—07</span>
+          </div>
+          <div class="preset-list" id="presetList"></div>
+        </div>
+
+        <div class="settings-block">
+          <div class="section-heading">
+            <p class="eyebrow">SIGNAL</p>
+            <span>LIVE SYNTHESIS</span>
+          </div>
+
+          <label class="range-row" for="beatFrequency">
+            <span><b>Beat frequency</b><small id="beatValue">8.0 Hz</small></span>
+            <input id="beatFrequency" type="range" min="1" max="40" value="8" step="0.1" />
+          </label>
+          <label class="range-row" for="carrierFrequency">
+            <span><b>Base carrier</b><small id="carrierValue">180 Hz</small></span>
+            <input id="carrierFrequency" type="range" min="90" max="360" value="180" step="1" />
+          </label>
+          <label class="range-row" for="masterVolume">
+            <span><b>Output</b><small id="volumeValue">35%</small></span>
+            <input id="masterVolume" type="range" min="0" max="0.65" value="0.35" step="0.01" />
+          </label>
+
+          <div class="segmented" aria-label="Tone shape">
+            <button class="tone active" data-wave="sine">PURE</button>
+            <button class="tone" data-wave="triangle">SOFT</button>
+          </div>
+        </div>
+      </section>
+    </main>
+
+    <dialog id="infoDialog">
+      <button class="dialog-close" id="closeDialog" aria-label="Close">×</button>
+      <p class="eyebrow">HOW IT WORKS</p>
+      <h2>A difference you can hear.</h2>
+      <p>Phase sends a slightly different tone to each ear. Your brain perceives the frequency gap as a gentle rhythmic pulse. The ten faders mix harmonic carrier pairs for a richer sound.</p>
+      <p class="fine-print">Use stereo headphones at a comfortable volume. This is a relaxation and focus tool, not a medical treatment. Do not use while driving.</p>
+    </dialog>
+
+    <script src="app.js"></script>
+  </body>
+</html>
