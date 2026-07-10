@@ -21,7 +21,7 @@ let currentTrackIndex = -1, trackSequence = 0, isAnalysingSet = false;
 const KEY_CONFIDENCE_THRESHOLD = .22;
 const BPM_CONFIDENCE_THRESHOLD = .3;
 const breathingRates = [4.5, 5, 5.5, 6, 6.5, 7, 8];
-let adaptiveGain, airSource, airGain, airFilter, airPanner, impulseTimer, nextImpulseBeat = null;
+let adaptiveGain, airSource, airGain, airFilter, airPanner, impulseTimer, nextRainTime = null;
 
 const noteNames = ["C", "C♯", "D", "E♭", "E", "F", "F♯", "G", "A♭", "A", "B♭", "B"];
 const majorProfile = [6.35, 2.23, 3.48, 2.33, 4.38, 4.09, 2.52, 5.19, 2.39, 3.66, 2.29, 2.88];
@@ -192,7 +192,7 @@ function updateAdaptiveStatus(track = playlist[currentTrackIndex]) {
   }
   const locked = track.bpmConfidence >= BPM_CONFIDENCE_THRESHOLD;
   $("impulseStatus").textContent = state.impulse
-    ? locked ? `${Math.round(track.bpm)} BPM · BEAT-LOCKED` : "LOW CONF · CONTINUOUS AIR"
+    ? locked ? `${Math.round(track.bpm)} BPM · BPM-SHAPED RAIN` : "LOW CONF · CONTINUOUS AIR"
     : "OFF";
   const plan = breathingPlan(track);
   $("breathStatus").textContent = state.breathing ? `${plan.rate.toFixed(1)}/MIN${plan.beats ? ` · ${plan.beats} BEATS` : " · FREE"}` : "OFF";
@@ -216,22 +216,23 @@ function updateAirBed(immediate = false) {
 function scheduleImpulse(when, strength = 1, transition = false) {
   if (!audioContext || !adaptiveGain || !state.impulse) return;
   const source = audioContext.createBufferSource();
-  source.buffer = noiseBuffer(transition ? .8 : .16);
+  source.buffer = noiseBuffer(transition ? .8 : .11);
+  source.loop = transition;
   const filter = audioContext.createBiquadFilter();
   filter.type = "bandpass";
-  filter.frequency.value = transition ? 1050 : 1750 + Math.random() * 1500;
-  filter.Q.value = transition ? .32 : .7;
+  filter.frequency.value = transition ? 1050 : 900 + Math.pow(Math.random(), .65) * 5200;
+  filter.Q.value = transition ? .32 : .45 + Math.random() * .8;
   const gain = audioContext.createGain();
   const panner = audioContext.createStereoPanner();
-  const duration = transition ? Math.max(.8, state.crossfadeSeconds * .55) : .055 + strength * .075;
-  const peak = state.textureIntensity * (transition ? .075 : .042) * (.55 + strength * .45);
-  const width = state.spatial ? (transition ? .92 : .25 + strength * .65) : 0;
+  const duration = transition ? Math.max(.8, state.crossfadeSeconds * .55) : .018 + Math.random() * .062;
+  const peak = state.textureIntensity * .075 * (.62 + strength * .55) * (.72 + Math.random() * .38);
+  const width = state.spatial ? (transition ? .92 : .45 + Math.random() * .5) : 0;
   const direction = Math.random() < .5 ? -1 : 1;
   gain.gain.setValueAtTime(0.0001, when);
   gain.gain.exponentialRampToValueAtTime(Math.max(.0002, peak), when + Math.min(.025, duration * .2));
   gain.gain.exponentialRampToValueAtTime(.0001, when + duration);
-  panner.pan.setValueAtTime(-direction * width, when);
-  panner.pan.linearRampToValueAtTime(direction * width, when + duration);
+  panner.pan.setValueAtTime(transition ? -direction * width : direction * width, when);
+  panner.pan.linearRampToValueAtTime(transition ? direction * width : direction * width * .72, when + duration);
   source.connect(filter).connect(gain).connect(panner).connect(adaptiveGain);
   source.start(when);
   source.stop(when + duration + .02);
@@ -243,23 +244,28 @@ function scheduleAdaptiveAudio() {
   const track = playlist[currentTrackIndex];
   if (!state.impulse || crossfadeInProgress || !track?.bpm || track.bpmConfidence < BPM_CONFIDENCE_THRESHOLD) return;
   const player = activePlayer();
-  const beatDuration = 60 / track.bpm;
-  const currentBeat = (player.currentTime - (track.beatOffset || 0)) / beatDuration;
-  if (nextImpulseBeat == null || nextImpulseBeat < currentBeat - 1) nextImpulseBeat = Math.ceil(currentBeat / 4) * 4;
-  const horizon = currentBeat + .28 / beatDuration;
-  while (nextImpulseBeat <= horizon) {
-    const trackTime = (track.beatOffset || 0) + nextImpulseBeat * beatDuration;
-    const energy = trackEnergyAt(track, trackTime);
-    // Sparse four-beat punctuation; it becomes more present in genuine quiet space.
-    const strength = .35 + (1 - energy) * .65;
-    scheduleImpulse(audioContext.currentTime + Math.max(.01, trackTime - player.currentTime), strength);
-    nextImpulseBeat += 4;
+  const now = audioContext.currentTime;
+  const horizon = now + .3;
+  if (nextRainTime == null || nextRainTime < now) nextRainTime = now + .02;
+  while (nextRainTime <= horizon) {
+    const futureTrackTime = player.currentTime + (nextRainTime - now);
+    const energy = trackEnergyAt(track, futureTrackTime);
+    const beatPosition = (futureTrackTime - (track.beatOffset || 0)) * track.bpm / 60;
+    // BPM shapes a slow bar-sized density swell; the droplets themselves remain
+    // stochastic, avoiding the sound of an extra (and possibly wrong) drum part.
+    const phraseShape = .78 + .22 * (.5 + .5 * Math.cos(beatPosition * Math.PI / 2));
+    const quietness = 1 - energy;
+    const rate = (5 + state.textureIntensity * 16 + quietness * 4) * phraseShape;
+    const strength = .42 + quietness * .58;
+    scheduleImpulse(nextRainTime, strength);
+    const randomInterval = -Math.log(Math.max(.001, 1 - Math.random())) / rate;
+    nextRainTime += Math.max(.026, Math.min(.22, randomInterval));
   }
 }
 
 function startAdaptiveAudio() {
   clearInterval(impulseTimer);
-  nextImpulseBeat = null;
+  nextRainTime = null;
   updateAirBed(true);
   impulseTimer = setInterval(scheduleAdaptiveAudio, 90);
 }
@@ -267,7 +273,7 @@ function startAdaptiveAudio() {
 function stopAdaptiveAudio() {
   clearInterval(impulseTimer);
   impulseTimer = null;
-  nextImpulseBeat = null;
+  nextRainTime = null;
   updateAirBed(true);
 }
 
@@ -721,7 +727,7 @@ function presentTrack(index, applyAudio = true) {
   if (state.playing && applyAudio) applyTrackCue(track);
   else if (track.tonic != null) setDetectedKey(track.tonic, track.key, track.confidence, applyAudio);
   applyDynamicToneLevel(applyAudio);
-  nextImpulseBeat = null;
+  nextRainTime = null;
   updateAdaptiveStatus(track);
   updateAirBed(true);
   renderPlaylist();
@@ -874,7 +880,7 @@ function finishCrossfade() {
   setDeckGain(previousDeck, 0, .01);
   setDeckGain(activeDeck, Number($("musicVolume").value), .03);
   presentTrack(currentTrackIndex, false);
-  nextImpulseBeat = null;
+  nextRainTime = null;
   updateAirBed(true);
   $("playStatus").textContent = `${isRecording ? "RECORDING" : "PLAYING"} ${currentTrackIndex + 1}/${playlist.length}`;
 }
@@ -1361,7 +1367,7 @@ function bindAdaptiveToggle(id, key) {
     $(id).setAttribute("aria-pressed", String(state[key]));
     updateAdaptiveStatus();
     updateAirBed(true);
-    if (key === "impulse") nextImpulseBeat = null;
+    if (key === "impulse") nextRainTime = null;
     if (key === "breathing") applyDynamicToneLevel(true);
   });
 }
