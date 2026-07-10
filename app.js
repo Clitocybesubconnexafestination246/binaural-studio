@@ -5,7 +5,7 @@ const presets = [
   { name: "Calm", hz: 8, carrier: 130, levels: [.72, .9, .64, .48, .34, .24, .16, .1, .06, .03] },
   { name: "Clear Mind", hz: 10, carrier: 140, levels: [.55, .74, .9, .62, .44, .3, .2, .12, .07, .04] },
   { name: "Deep Focus", hz: 16, carrier: 150, levels: [.38, .52, .7, .92, .8, .58, .38, .24, .14, .08] },
-  { name: "Bright Alert", hz: 32, carrier: 160, levels: [.24, .36, .48, .64, .82, .94, .76, .55, .36, .18] }
+  { name: "Bright Alert", hz: 32, carrier: 110, levels: [.68, .8, .62, .4, .24, .13, .07, .03, .01, 0] }
 ];
 
 const knobColors = ["#ff815d", "#f5a24b", "#e9c857", "#b8d967", "#68d598", "#54d5c4", "#59c0ea", "#7393f2", "#a579e8", "#dd79bb"];
@@ -13,7 +13,7 @@ const state = { preset: 3, beat: 8, carrier: 130, volume: .35, wave: "sine", lev
 let audioContext, masterGain;
 const voices = [];
 const musicSources = [], musicGains = [];
-let activeDeck = 0, crossfadeInProgress = false, crossfadeTimer;
+let activeDeck = 0, crossfadeInProgress = false, crossfadeTimer, crossfadeToneTarget;
 let detectedRoot = null;
 const playlist = [];
 let currentTrackIndex = -1, trackSequence = 0, isAnalysingSet = false;
@@ -404,7 +404,7 @@ function applyTrackCue(track) {
   if (track.tonic != null) setDetectedKey(track.tonic, track.key, track.confidence);
 }
 
-function presentTrack(index) {
+function presentTrack(index, applyAudio = true) {
   const track = playlist[index];
   if (!track) return;
   currentTrackIndex = index;
@@ -423,9 +423,9 @@ function presentTrack(index) {
     $("matchStatus").textContent = "ANALYSE SET BEFORE PLAYBACK";
   }
   $("autoLevelStatus").textContent = track.envelope ? `READY · ${Math.round(track.envelope.quietFraction * 100)}% QUIET` : "ANALYSING WAVEFORM";
-  if (state.playing) applyTrackCue(track);
-  else if (track.tonic != null) setDetectedKey(track.tonic, track.key, track.confidence);
-  applyDynamicToneLevel(true);
+  if (state.playing && applyAudio) applyTrackCue(track);
+  else if (track.tonic != null) setDetectedKey(track.tonic, track.key, track.confidence, applyAudio);
+  applyDynamicToneLevel(applyAudio);
   renderPlaylist();
 }
 
@@ -438,6 +438,12 @@ function cancelCrossfade() {
   standby.load();
   setDeckGain(activeDeck, Number($("musicVolume").value), .03);
   setDeckGain(1 - activeDeck, 0, .03);
+  if (crossfadeToneTarget) {
+    crossfadeToneTarget = null;
+    updateAudioParams(false, .25);
+    masterGain.gain.cancelScheduledValues(audioContext.currentTime);
+    applyDynamicToneLevel(true);
+  }
 }
 
 async function selectTrack(index, autoplay = false) {
@@ -452,6 +458,73 @@ async function selectTrack(index, autoplay = false) {
   if (autoplay) {
     try { await player.play(); } catch (error) { console.warn("The next local track could not start", error); }
   }
+}
+
+function carrierForKey(root, referenceCarrier = state.carrier) {
+  const pitchClass = (root + state.relation) % 12;
+  const currentMidi = 69 + 12 * Math.log2(referenceCarrier / 440);
+  const candidates = [];
+  for (let midi = 42; midi <= 53; midi++) {
+    if (((midi % 12) + 12) % 12 === pitchClass) candidates.push(midi);
+  }
+  const selected = candidates.reduce((best, midi) => Math.abs(midi - currentMidi) < Math.abs(best - currentMidi) ? midi : best, candidates[0]);
+  return { pitchClass, frequency: 440 * Math.pow(2, (selected - 69) / 12) };
+}
+
+function toneTargetForTrack(track) {
+  const cue = track.presetOverride != null ? presets[track.presetOverride] : null;
+  const target = {
+    preset: cue ? track.presetOverride : state.preset,
+    beat: cue ? cue.hz : state.beat,
+    carrier: cue ? cue.carrier : state.carrier,
+    levels: cue ? [...cue.levels] : [...state.levels],
+    wave: state.wave
+  };
+  if (state.autoMatch && track.tonic != null && track.confidence >= KEY_CONFIDENCE_THRESHOLD) {
+    target.carrier = carrierForKey(track.tonic, target.carrier).frequency;
+  }
+  return target;
+}
+
+function scheduleToneCrossfade(track, duration) {
+  if (!audioContext || !voices.length) return;
+  const target = toneTargetForTrack(track);
+  const now = audioContext.currentTime;
+  const targetSum = target.levels.reduce((sum, level) => sum + level, 0) || 1;
+  voices.forEach((voice, index) => {
+    const base = target.carrier * (1 + index * .36);
+    const leftTarget = base - target.beat / 2;
+    const rightTarget = base + target.beat / 2;
+    [voice.left.frequency, voice.right.frequency, voice.leftGain.gain, voice.rightGain.gain].forEach((parameter) => {
+      parameter.cancelScheduledValues(now);
+      parameter.setValueAtTime(parameter.value, now);
+    });
+    voice.left.frequency.linearRampToValueAtTime(leftTarget, now + duration);
+    voice.right.frequency.linearRampToValueAtTime(rightTarget, now + duration);
+    const gainTarget = (target.levels[index] / Math.sqrt(targetSum)) * .32;
+    voice.leftGain.gain.linearRampToValueAtTime(gainTarget, now + duration);
+    voice.rightGain.gain.linearRampToValueAtTime(gainTarget, now + duration);
+  });
+  const targetScale = toneScaleForTrack(track, 0);
+  masterGain.gain.cancelScheduledValues(now);
+  masterGain.gain.setValueAtTime(masterGain.gain.value, now);
+  masterGain.gain.linearRampToValueAtTime(state.volume * targetScale, now + duration);
+  crossfadeToneTarget = target;
+}
+
+function commitToneCrossfade() {
+  if (!crossfadeToneTarget) return;
+  state.preset = crossfadeToneTarget.preset;
+  state.beat = crossfadeToneTarget.beat;
+  state.carrier = crossfadeToneTarget.carrier;
+  state.levels = [...crossfadeToneTarget.levels];
+  state.wave = crossfadeToneTarget.wave;
+  $("beatFrequency").value = state.beat;
+  $("carrierFrequency").value = Math.round(state.carrier);
+  syncFaders();
+  updateReadouts(state.preset >= 0 ? presets[state.preset].name : "Custom");
+  [...presetList.children].forEach((element, index) => element.classList.toggle("active", index === state.preset));
+  crossfadeToneTarget = null;
 }
 
 async function startCrossfade() {
@@ -481,6 +554,7 @@ async function startCrossfade() {
   }
   musicGains[activeDeck].gain.setValueCurveAtTime(fadeOut, now, duration);
   musicGains[nextDeck].gain.setValueCurveAtTime(fadeIn, now, duration);
+  scheduleToneCrossfade(playlist[nextIndex], duration);
   $("playStatus").textContent = `CROSSFADE ${currentTrackIndex + 1}→${nextIndex + 1}`;
   crossfadeTimer = setTimeout(finishCrossfade, duration * 1000);
 }
@@ -495,9 +569,10 @@ function finishCrossfade() {
   currentTrackIndex += 1;
   crossfadeInProgress = false;
   clearTimeout(crossfadeTimer);
+  commitToneCrossfade();
   setDeckGain(previousDeck, 0, .01);
   setDeckGain(activeDeck, Number($("musicVolume").value), .03);
-  presentTrack(currentTrackIndex);
+  presentTrack(currentTrackIndex, false);
   $("playStatus").textContent = `PLAYING ${currentTrackIndex + 1}/${playlist.length}`;
 }
 
@@ -722,7 +797,7 @@ async function analyseSet(force = false) {
   $("playStatus").textContent = playlist.every((track) => track.status === "analysed") ? "SET READY" : "CHECK FILES";
 }
 
-function setDetectedKey(root, label, confidence) {
+function setDetectedKey(root, label, confidence, applyMatch = true) {
   const changed = $("detectedKey").textContent !== label;
   $("detectedKey").textContent = label;
   const reliable = confidence >= KEY_CONFIDENCE_THRESHOLD;
@@ -733,19 +808,26 @@ function setDetectedKey(root, label, confidence) {
     display.classList.remove("key-change");
     requestAnimationFrame(() => display.classList.add("key-change"));
   }
-  if (state.autoMatch && reliable) matchCarrierToKey();
+  if (state.autoMatch && reliable && applyMatch) matchCarrierToKey();
+  else if (state.autoMatch && reliable) {
+    const matched = carrierForKey(root);
+    $("matchStatus").textContent = `${noteNames[matched.pitchClass]} · ${matched.frequency.toFixed(1)} HZ`;
+  }
   else if (state.autoMatch) $("matchStatus").textContent = `HELD AT ${state.carrier.toFixed(1)} HZ`;
 }
 
-function currentToneScale() {
-  const track = playlist[currentTrackIndex];
+function toneScaleForTrack(track, time) {
   if (!state.autoLevel || !track?.envelope?.toneValues?.length) return 1;
-  const envelopeIndex = Math.min(track.envelope.toneValues.length - 1, Math.floor(activePlayer().currentTime * track.envelope.pointsPerSecond));
+  const envelopeIndex = Math.min(track.envelope.toneValues.length - 1, Math.floor(time * track.envelope.pointsPerSecond));
   const maskingScale = track.envelope.toneValues[envelopeIndex];
   const confidenceScale = track.confidence < KEY_CONFIDENCE_THRESHOLD
     ? .82 + .18 * (track.confidence / KEY_CONFIDENCE_THRESHOLD)
     : 1;
   return Math.max(.5, Math.min(1, maskingScale * confidenceScale));
+}
+
+function currentToneScale() {
+  return toneScaleForTrack(playlist[currentTrackIndex], activePlayer().currentTime);
 }
 
 function applyDynamicToneLevel(immediate = false) {
@@ -754,23 +836,16 @@ function applyDynamicToneLevel(immediate = false) {
   const track = playlist[currentTrackIndex];
   const reason = track?.confidence < KEY_CONFIDENCE_THRESHOLD ? "LOW CONFIDENCE BED" : state.toneScale < .72 ? "QUIET BED" : "CONSTANT BED";
   $("autoLevelStatus").textContent = state.autoLevel ? `${percentage}% · ${reason}` : "FIXED OUTPUT";
-  if (audioContext && state.playing) {
+  if (audioContext && state.playing && !crossfadeInProgress) {
     masterGain.gain.setTargetAtTime(state.volume * state.toneScale, audioContext.currentTime, immediate ? .08 : .85);
   }
 }
 
 function matchCarrierToKey() {
   if (detectedRoot == null) return;
-  const pitchClass = (detectedRoot + state.relation) % 12;
-  const currentMidi = 69 + 12 * Math.log2(state.carrier / 440);
-  const candidates = [];
-  // F♯2–F3 covers every pitch class while keeping the carrier low in the mix.
-  for (let midi = 42; midi <= 53; midi++) {
-    if (((midi % 12) + 12) % 12 === pitchClass) candidates.push(midi);
-  }
-  const selected = candidates.reduce((best, midi) => Math.abs(midi - currentMidi) < Math.abs(best - currentMidi) ? midi : best, candidates[0]);
-  const target = 440 * Math.pow(2, (selected - 69) / 12);
-  $("matchStatus").textContent = `${noteNames[pitchClass]} · ${target.toFixed(1)} HZ`;
+  const matched = carrierForKey(detectedRoot);
+  const target = matched.frequency;
+  $("matchStatus").textContent = `${noteNames[matched.pitchClass]} · ${target.toFixed(1)} HZ`;
   if (Math.abs(target - state.carrier) < .5) return;
   state.carrier = target;
   $("carrierFrequency").value = Math.round(target);

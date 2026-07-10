@@ -14,6 +14,8 @@ The adaptive layer is intentionally a constant bed rather than a reactive gate: 
 
 Use **Sort by key** to build a harmonically adjacent running order; uncertain key results are left at the end. **Auto Xfade** overlaps two local playback decks for adjustable 2–12 second transitions. Each playlist row also has a state cue: choose a preset such as Calm or Deep Focus and it will take effect when that track begins, persisting through later tracks marked Continue until another cue changes it.
 
+During an automatic crossfade, the binaural carrier, beat frequency, harmonic balance, and output level interpolate across the same transition window as the music. Reliable key changes therefore keep the pleasing pitch slide without an abrupt reconfiguration at the handoff. Bright Alert uses a 110 Hz carrier and a steeply reduced upper-harmonic mix to keep its 32 Hz beat usable at lower perceived pitch.
+
 ## Run locally
 
 No build step or dependencies are required. From this folder, start any static server:
