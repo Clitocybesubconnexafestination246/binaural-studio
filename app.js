@@ -9,7 +9,7 @@ const presets = [
 ];
 
 const knobColors = ["#ff815d", "#f5a24b", "#e9c857", "#b8d967", "#68d598", "#54d5c4", "#59c0ea", "#7393f2", "#a579e8", "#dd79bb"];
-const state = { preset: 3, beat: 8, carrier: 130, volume: .35, wave: "sine", levels: [...presets[3].levels], playing: false, autoMatch: true, autoLevel: true, toneScale: 1, relation: 0, crossfade: true, crossfadeSeconds: 6 };
+const state = { preset: 3, beat: 8, carrier: 130, volume: .35, wave: "sine", levels: [...presets[3].levels], playing: false, autoMatch: true, autoLevel: true, toneScale: 1, relation: 0, crossfade: true, crossfadeSeconds: 6, impulse: true, breathing: true, spatial: true, textureIntensity: .28 };
 let audioContext, masterGain;
 const voices = [];
 const musicSources = [], musicGains = [];
@@ -19,6 +19,9 @@ let recordDestination, mediaRecorder, recordedChunks = [], recordingWritable, re
 const playlist = [];
 let currentTrackIndex = -1, trackSequence = 0, isAnalysingSet = false;
 const KEY_CONFIDENCE_THRESHOLD = .22;
+const BPM_CONFIDENCE_THRESHOLD = .3;
+const breathingRates = [4.5, 5, 5.5, 6, 6.5, 7, 8];
+let adaptiveGain, airSource, airGain, airFilter, airPanner, impulseTimer, nextImpulseBeat = null;
 
 const noteNames = ["C", "C♯", "D", "E♭", "E", "F", "F♯", "G", "A♭", "A", "B♭", "B"];
 const majorProfile = [6.35, 2.23, 3.48, 2.33, 4.38, 4.09, 2.52, 5.19, 2.39, 3.66, 2.29, 2.88];
@@ -79,6 +82,12 @@ function createAudio() {
   recordDestination = audioContext.createMediaStreamDestination();
   masterGain.connect(recordDestination);
 
+  adaptiveGain = audioContext.createGain();
+  adaptiveGain.gain.value = 1;
+  adaptiveGain.connect(audioContext.destination);
+  adaptiveGain.connect(recordDestination);
+  createAirBed();
+
   connectMusicSources();
 
   for (let i = 0; i < 10; i++) {
@@ -97,6 +106,33 @@ function createAudio() {
   }
   updateAudioParams(true);
   return true;
+}
+
+function noiseBuffer(seconds = 2) {
+  const buffer = audioContext.createBuffer(1, Math.ceil(audioContext.sampleRate * seconds), audioContext.sampleRate);
+  const data = buffer.getChannelData(0);
+  let previous = 0;
+  for (let i = 0; i < data.length; i++) {
+    const white = Math.random() * 2 - 1;
+    previous = previous * .16 + white * .84;
+    data[i] = previous;
+  }
+  return buffer;
+}
+
+function createAirBed() {
+  airSource = audioContext.createBufferSource();
+  airSource.buffer = noiseBuffer(3);
+  airSource.loop = true;
+  airFilter = audioContext.createBiquadFilter();
+  airFilter.type = "bandpass";
+  airFilter.frequency.value = 1450;
+  airFilter.Q.value = .42;
+  airGain = audioContext.createGain();
+  airGain.gain.value = 0;
+  airPanner = audioContext.createStereoPanner();
+  airSource.connect(airFilter).connect(airGain).connect(airPanner).connect(adaptiveGain);
+  airSource.start();
 }
 
 function connectMusicSources() {
@@ -118,6 +154,121 @@ function setDeckGain(deck, value, glide = .04) {
   const parameter = musicGains[deck].gain;
   parameter.cancelScheduledValues(audioContext.currentTime);
   parameter.setTargetAtTime(value, audioContext.currentTime, glide);
+}
+
+function trackEnergyAt(track, time) {
+  if (!track?.envelope?.values?.length) return .5;
+  const index = Math.min(track.envelope.values.length - 1, Math.max(0, Math.floor(time * track.envelope.pointsPerSecond)));
+  return track.envelope.values[index];
+}
+
+function breathingPlan(track = playlist[currentTrackIndex]) {
+  const presetIndex = state.preset >= 0 ? state.preset : Math.max(0, Math.min(6, Math.round(state.beat / 5)));
+  const targetRate = breathingRates[presetIndex];
+  if (!track?.bpm || track.bpmConfidence < BPM_CONFIDENCE_THRESHOLD) return { rate: targetRate, beats: null };
+  const options = [8, 12, 16, 20, 24, 28, 32];
+  const beats = options.reduce((best, candidate) => Math.abs(track.bpm / candidate - targetRate) < Math.abs(track.bpm / best - targetRate) ? candidate : best, options[0]);
+  return { rate: track.bpm / beats, beats };
+}
+
+function breathingScale(track, time) {
+  if (!state.breathing) return 1;
+  const plan = breathingPlan(track);
+  const phase = track?.bpm && plan.beats
+    ? ((time - (track.beatOffset || 0)) * track.bpm / 60 / plan.beats) * Math.PI * 2
+    : time * plan.rate / 60 * Math.PI * 2;
+  // Long, shallow inhale/exhale movement: audible as continuity, not pumping.
+  return .965 + .035 * (.5 + .5 * Math.sin(phase - Math.PI / 2));
+}
+
+function updateAdaptiveStatus(track = playlist[currentTrackIndex]) {
+  const ready = track?.status === "analysed";
+  $("adaptiveStrip").classList.toggle("disabled", !ready);
+  ["impulseButton", "breathButton", "spatialButton"].forEach((id) => { $(id).disabled = !ready; });
+  if (!ready) {
+    $("impulseStatus").textContent = "WAITING FOR BPM";
+    $("breathStatus").textContent = "PRESET-LED";
+    return;
+  }
+  const locked = track.bpmConfidence >= BPM_CONFIDENCE_THRESHOLD;
+  $("impulseStatus").textContent = state.impulse
+    ? locked ? `${Math.round(track.bpm)} BPM · BEAT-LOCKED` : "LOW CONF · CONTINUOUS AIR"
+    : "OFF";
+  const plan = breathingPlan(track);
+  $("breathStatus").textContent = state.breathing ? `${plan.rate.toFixed(1)}/MIN${plan.beats ? ` · ${plan.beats} BEATS` : " · FREE"}` : "OFF";
+  $("spatialStatus").textContent = state.spatial ? "ADAPTIVE WIDTH" : "CENTRED";
+}
+
+function updateAirBed(immediate = false) {
+  if (!audioContext || !airGain) return;
+  const track = playlist[currentTrackIndex];
+  const lowConfidence = !track?.bpm || track.bpmConfidence < BPM_CONFIDENCE_THRESHOLD;
+  const quietness = 1 - trackEnergyAt(track, activePlayer().currentTime);
+  const crossfadeLift = crossfadeInProgress ? .6 : 0;
+  const prominence = Math.max(quietness * .7, crossfadeLift);
+  const target = state.playing && state.impulse && lowConfidence
+    ? state.textureIntensity * (.012 + prominence * .02)
+    : state.playing && state.impulse && crossfadeInProgress ? state.textureIntensity * .014 : 0;
+  airGain.gain.setTargetAtTime(target, audioContext.currentTime, immediate ? .08 : 1.1);
+  airPanner.pan.setTargetAtTime(state.spatial ? Math.sin(activePlayer().currentTime * .14) * .38 : 0, audioContext.currentTime, 1.4);
+}
+
+function scheduleImpulse(when, strength = 1, transition = false) {
+  if (!audioContext || !adaptiveGain || !state.impulse) return;
+  const source = audioContext.createBufferSource();
+  source.buffer = noiseBuffer(transition ? .8 : .16);
+  const filter = audioContext.createBiquadFilter();
+  filter.type = "bandpass";
+  filter.frequency.value = transition ? 1050 : 1750 + Math.random() * 1500;
+  filter.Q.value = transition ? .32 : .7;
+  const gain = audioContext.createGain();
+  const panner = audioContext.createStereoPanner();
+  const duration = transition ? Math.max(.8, state.crossfadeSeconds * .55) : .055 + strength * .075;
+  const peak = state.textureIntensity * (transition ? .075 : .042) * (.55 + strength * .45);
+  const width = state.spatial ? (transition ? .92 : .25 + strength * .65) : 0;
+  const direction = Math.random() < .5 ? -1 : 1;
+  gain.gain.setValueAtTime(0.0001, when);
+  gain.gain.exponentialRampToValueAtTime(Math.max(.0002, peak), when + Math.min(.025, duration * .2));
+  gain.gain.exponentialRampToValueAtTime(.0001, when + duration);
+  panner.pan.setValueAtTime(-direction * width, when);
+  panner.pan.linearRampToValueAtTime(direction * width, when + duration);
+  source.connect(filter).connect(gain).connect(panner).connect(adaptiveGain);
+  source.start(when);
+  source.stop(when + duration + .02);
+}
+
+function scheduleAdaptiveAudio() {
+  if (!audioContext || !state.playing) return;
+  updateAirBed();
+  const track = playlist[currentTrackIndex];
+  if (!state.impulse || crossfadeInProgress || !track?.bpm || track.bpmConfidence < BPM_CONFIDENCE_THRESHOLD) return;
+  const player = activePlayer();
+  const beatDuration = 60 / track.bpm;
+  const currentBeat = (player.currentTime - (track.beatOffset || 0)) / beatDuration;
+  if (nextImpulseBeat == null || nextImpulseBeat < currentBeat - 1) nextImpulseBeat = Math.ceil(currentBeat / 4) * 4;
+  const horizon = currentBeat + .28 / beatDuration;
+  while (nextImpulseBeat <= horizon) {
+    const trackTime = (track.beatOffset || 0) + nextImpulseBeat * beatDuration;
+    const energy = trackEnergyAt(track, trackTime);
+    // Sparse four-beat punctuation; it becomes more present in genuine quiet space.
+    const strength = .35 + (1 - energy) * .65;
+    scheduleImpulse(audioContext.currentTime + Math.max(.01, trackTime - player.currentTime), strength);
+    nextImpulseBeat += 4;
+  }
+}
+
+function startAdaptiveAudio() {
+  clearInterval(impulseTimer);
+  nextImpulseBeat = null;
+  updateAirBed(true);
+  impulseTimer = setInterval(scheduleAdaptiveAudio, 90);
+}
+
+function stopAdaptiveAudio() {
+  clearInterval(impulseTimer);
+  impulseTimer = null;
+  nextImpulseBeat = null;
+  updateAirBed(true);
 }
 
 function harmonicFrequency(index) {
@@ -169,6 +320,8 @@ async function togglePlay() {
   masterGain.gain.cancelScheduledValues(audioContext.currentTime);
   if (state.playing) applyDynamicToneLevel(true);
   else masterGain.gain.setTargetAtTime(0, audioContext.currentTime, .06);
+  if (state.playing) startAdaptiveAudio();
+  else stopAdaptiveAudio();
   document.body.classList.toggle("playing", state.playing);
   $("sortKeyButton").disabled = state.playing || playlist.length < 2 || playlist.some((track) => track.status !== "analysed");
   $("playButton").setAttribute("aria-pressed", String(state.playing));
@@ -324,6 +477,7 @@ function applyPreset(index) {
   updateReadouts(preset.name);
   [...presetList.children].forEach((el, i) => el.classList.toggle("active", i === index));
   updateAudioParams();
+  updateAdaptiveStatus();
 }
 
 function syncFaders() {
@@ -345,6 +499,7 @@ function markCustom() {
   state.preset = -1;
   [...presetList.children].forEach((el) => el.classList.remove("active"));
   updateReadouts("Custom");
+  updateAdaptiveStatus();
 }
 
 function formatTime(seconds) {
@@ -394,6 +549,11 @@ function renderPlaylist() {
     key.className = "track-key";
     key.textContent = track.key || "—";
 
+    const bpm = document.createElement("span");
+    bpm.className = "track-bpm";
+    bpm.textContent = track.bpm ? String(Math.round(track.bpm)) : "—";
+    bpm.title = track.bpm ? `${Math.round(track.bpmConfidence * 100)}% rhythm confidence` : "Not analysed";
+
     const time = document.createElement("span");
     time.className = "track-time";
     time.textContent = track.duration ? formatTime(track.duration) : "—";
@@ -437,7 +597,7 @@ function renderPlaylist() {
       actions.appendChild(button);
     });
 
-    row.append(order, title, key, time, status, presetCue, actions);
+    row.append(order, title, key, bpm, time, status, presetCue, actions);
     container.appendChild(row);
   });
   updateSetSummary();
@@ -509,6 +669,7 @@ function resetCurrentTrackUI() {
   $("autoMatchButton").disabled = true;
   $("autoLevelButton").disabled = true;
   $("autoLevelStatus").textContent = "WAITING FOR WAVEFORM";
+  updateAdaptiveStatus(null);
   $("trackPosition").disabled = true;
   $("timeline").classList.add("disabled");
   $("currentTime").textContent = "0:00";
@@ -560,6 +721,9 @@ function presentTrack(index, applyAudio = true) {
   if (state.playing && applyAudio) applyTrackCue(track);
   else if (track.tonic != null) setDetectedKey(track.tonic, track.key, track.confidence, applyAudio);
   applyDynamicToneLevel(applyAudio);
+  nextImpulseBeat = null;
+  updateAdaptiveStatus(track);
+  updateAirBed(true);
   renderPlaylist();
 }
 
@@ -578,6 +742,7 @@ function cancelCrossfade() {
     masterGain.gain.cancelScheduledValues(audioContext.currentTime);
     applyDynamicToneLevel(true);
   }
+  updateAirBed(true);
 }
 
 async function selectTrack(index, autoplay = false) {
@@ -689,6 +854,8 @@ async function startCrossfade() {
   musicGains[activeDeck].gain.setValueCurveAtTime(fadeOut, now, duration);
   musicGains[nextDeck].gain.setValueCurveAtTime(fadeIn, now, duration);
   scheduleToneCrossfade(playlist[nextIndex], duration);
+  updateAirBed(true);
+  scheduleImpulse(now + duration * .22, .85, true);
   $("playStatus").textContent = `${isRecording ? "REC " : ""}CROSSFADE ${currentTrackIndex + 1}→${nextIndex + 1}`;
   crossfadeTimer = setTimeout(finishCrossfade, duration * 1000);
 }
@@ -707,6 +874,8 @@ function finishCrossfade() {
   setDeckGain(previousDeck, 0, .01);
   setDeckGain(activeDeck, Number($("musicVolume").value), .03);
   presentTrack(currentTrackIndex, false);
+  nextImpulseBeat = null;
+  updateAirBed(true);
   $("playStatus").textContent = `${isRecording ? "RECORDING" : "PLAYING"} ${currentTrackIndex + 1}/${playlist.length}`;
 }
 
@@ -771,6 +940,74 @@ function fft(real, imaginary) {
   }
 }
 
+async function analyseRhythm(buffer, channels) {
+  const envelopeRate = 100;
+  const hop = Math.max(1, Math.floor(buffer.sampleRate / envelopeRate));
+  const frameCount = Math.max(1, Math.floor(buffer.length / hop));
+  const energy = new Float32Array(frameCount);
+  const novelty = new Float32Array(frameCount);
+  let running = 0;
+  for (let frame = 0; frame < frameCount; frame++) {
+    const start = frame * hop;
+    const end = Math.min(buffer.length, start + hop);
+    let sum = 0, samples = 0;
+    for (let sample = start; sample < end; sample += 4) {
+      let value = 0;
+      channels.forEach((channel) => { value += Math.abs(channel[sample] || 0); });
+      sum += value / channels.length;
+      samples += 1;
+    }
+    energy[frame] = Math.log1p(36 * sum / Math.max(1, samples));
+    running = running * .93 + energy[frame] * .07;
+    novelty[frame] = Math.max(0, energy[frame] - running);
+    if (frame % 5000 === 4999) await new Promise((resolve) => requestAnimationFrame(resolve));
+  }
+
+  const mean = novelty.reduce((sum, value) => sum + value, 0) / novelty.length;
+  let variance = 0;
+  novelty.forEach((value) => { variance += (value - mean) ** 2; });
+  const deviation = Math.sqrt(variance / novelty.length) || 1;
+  novelty.forEach((value, index) => { novelty[index] = Math.max(0, (value - mean * .7) / deviation); });
+  // Ignore decoder/startup transients; a sustained drone must not look rhythmic.
+  novelty.fill(0, 0, Math.min(novelty.length, envelopeRate * 2));
+  let activeOnsets = 0;
+  novelty.forEach((value) => { if (value > .35) activeOnsets += 1; });
+
+  const minLag = Math.round(envelopeRate * 60 / 200);
+  const maxLag = Math.min(frameCount - 1, Math.round(envelopeRate * 60 / 60));
+  const scores = [];
+  for (let lag = minLag; lag <= maxLag; lag++) {
+    let correlation = 0, normA = 0, normB = 0;
+    for (let i = lag; i < frameCount; i++) {
+      correlation += novelty[i] * novelty[i - lag];
+      normA += novelty[i] * novelty[i];
+      normB += novelty[i - lag] * novelty[i - lag];
+    }
+    const bpm = 60 * envelopeRate / lag;
+    const normalized = correlation / (Math.sqrt(normA * normB) || 1);
+    const tempoPrior = .94 + .06 * Math.exp(-(((bpm - 120) / 55) ** 2));
+    scores.push({ lag, bpm, score: normalized * tempoPrior });
+  }
+  scores.sort((a, b) => b.score - a.score);
+  const best = scores[0] || { lag: envelopeRate / 2, bpm: 120, score: 0 };
+  const alternatives = scores.filter((candidate) => Math.abs(candidate.lag - best.lag) > 3);
+  const baseline = alternatives.reduce((sum, candidate) => sum + candidate.score, 0) / Math.max(1, alternatives.length);
+  const second = alternatives[0]?.score || baseline;
+  const clarity = Math.max(0, (best.score - baseline) / Math.max(.03, 1 - baseline));
+  const separation = Math.max(0, (best.score - second) / Math.max(.03, best.score));
+  const pulseStrength = Math.min(1, deviation * 2.8);
+  const activityGate = Math.min(1, (activeOnsets / novelty.length) / .025);
+  const confidence = Math.max(0, Math.min(1, (clarity * .7 + separation * .3) * pulseStrength * activityGate * 3.1));
+
+  let bestPhase = 0, bestPhaseScore = -1;
+  for (let phase = 0; phase < best.lag; phase++) {
+    let score = 0;
+    for (let i = phase; i < novelty.length; i += best.lag) score += novelty[i];
+    if (score > bestPhaseScore) { bestPhaseScore = score; bestPhase = phase; }
+  }
+  return { bpm: best.bpm, confidence, beatOffset: bestPhase / envelopeRate };
+}
+
 async function analyseAudioBuffer(buffer) {
   const fftSize = 8192;
   const available = Math.max(1, buffer.length - fftSize);
@@ -807,7 +1044,8 @@ async function analyseAudioBuffer(buffer) {
   }
   const keyResult = rankKey(chroma);
   const envelope = await analyseLoudnessEnvelope(buffer, channels);
-  return { ...keyResult, envelope };
+  const rhythm = await analyseRhythm(buffer, channels);
+  return { ...keyResult, envelope, rhythm };
 }
 
 async function analyseLoudnessEnvelope(buffer, channels) {
@@ -904,11 +1142,15 @@ async function analyseSet(force = false) {
       track.mode = result.mode;
       track.confidence = result.confidence;
       track.envelope = result.envelope;
+      track.bpm = result.rhythm.bpm;
+      track.bpmConfidence = result.rhythm.confidence;
+      track.beatOffset = result.rhythm.beatOffset;
       track.status = "analysed";
       if (playlist[currentTrackIndex]?.id === track.id) {
         setDetectedKey(track.tonic, track.key, track.confidence);
         $("autoLevelButton").disabled = false;
         $("autoLevelStatus").textContent = `READY · ${Math.round(track.envelope.quietFraction * 100)}% QUIET`;
+        updateAdaptiveStatus(track);
       }
     } catch (error) {
       track.status = "error";
@@ -961,7 +1203,8 @@ function toneScaleForTrack(track, time) {
 }
 
 function currentToneScale() {
-  return toneScaleForTrack(playlist[currentTrackIndex], activePlayer().currentTime);
+  const track = playlist[currentTrackIndex];
+  return toneScaleForTrack(track, activePlayer().currentTime) * breathingScale(track, activePlayer().currentTime);
 }
 
 function applyDynamicToneLevel(immediate = false) {
@@ -1019,6 +1262,9 @@ $("audioFile").addEventListener("change", (event) => {
     key: "",
     tonic: null,
     confidence: 0,
+    bpm: 0,
+    bpmConfidence: 0,
+    beatOffset: 0,
     presetOverride: null,
     status: "queued"
   }));
@@ -1036,6 +1282,7 @@ $("clearSetButton").addEventListener("click", () => {
     state.playing = false;
     deckPlayers().forEach((player) => player.pause());
     if (audioContext) masterGain.gain.setTargetAtTime(0, audioContext.currentTime, .06);
+    stopAdaptiveAudio();
     document.body.classList.remove("playing");
     $("playButton").setAttribute("aria-pressed", "false");
     $("playButton").setAttribute("aria-label", "Start audio");
@@ -1082,6 +1329,7 @@ deckPlayers().forEach((player) => {
     const completedRecording = isRecording;
     state.playing = false;
     if (audioContext) masterGain.gain.setTargetAtTime(0, audioContext.currentTime, .06);
+    stopAdaptiveAudio();
     document.body.classList.remove("playing");
     $("playButton").setAttribute("aria-pressed", "false");
     $("playButton").setAttribute("aria-label", "Start audio");
@@ -1105,6 +1353,25 @@ $("crossfadeButton").addEventListener("click", () => {
 $("crossfadeSeconds").addEventListener("input", (event) => {
   state.crossfadeSeconds = Number(event.target.value);
   $("crossfadeValue").textContent = `${state.crossfadeSeconds}s`;
+});
+function bindAdaptiveToggle(id, key) {
+  $(id).addEventListener("click", () => {
+    state[key] = !state[key];
+    $(id).classList.toggle("active", state[key]);
+    $(id).setAttribute("aria-pressed", String(state[key]));
+    updateAdaptiveStatus();
+    updateAirBed(true);
+    if (key === "impulse") nextImpulseBeat = null;
+    if (key === "breathing") applyDynamicToneLevel(true);
+  });
+}
+bindAdaptiveToggle("impulseButton", "impulse");
+bindAdaptiveToggle("breathButton", "breathing");
+bindAdaptiveToggle("spatialButton", "spatial");
+$("textureIntensity").addEventListener("input", (event) => {
+  state.textureIntensity = Number(event.target.value);
+  $("textureValue").textContent = `${Math.round(state.textureIntensity * 100)}%`;
+  updateAirBed(true);
 });
 $("recordSetButton").addEventListener("click", async () => {
   if (isRecording) {
@@ -1182,4 +1449,4 @@ function drawField() {
 }
 
 window.addEventListener("resize", resizeCanvas);
-buildUI(); renderPlaylist(); updateReadouts(); resizeCanvas(); drawField();
+buildUI(); renderPlaylist(); updateReadouts(); updateAdaptiveStatus(null); resizeCanvas(); drawField();

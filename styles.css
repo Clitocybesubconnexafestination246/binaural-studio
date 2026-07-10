@@ -368,9 +368,21 @@ body.recording .record-button i { animation: recordPulse 1.2s ease-in-out infini
 .timeline-toggle i { width: 7px; height: 7px; border-radius: 50%; background: #55534d; }
 .timeline-toggle.active { color: var(--ink); border-color: rgba(239,158,71,.4); }
 .timeline-toggle.active i { background: var(--accent); box-shadow: 0 0 12px rgba(239,158,71,.5); }
+.adaptive-strip { display: grid; grid-template-columns: repeat(3, minmax(180px, 1fr)) minmax(180px, .7fr); gap: 0; margin-top: 24px; border-top: 1px solid var(--line); border-bottom: 1px solid var(--line); transition: opacity 180ms ease; }
+.adaptive-strip.disabled { opacity: .35; }
+.adaptive-toggle { display: flex; align-items: center; gap: 11px; min-height: 66px; padding: 13px 18px; border: 0; border-right: 1px solid var(--line); background: transparent; color: #77746d; text-align: left; cursor: pointer; }
+.adaptive-toggle i { width: 8px; height: 8px; flex: 0 0 auto; border: 1px solid #66635d; border-radius: 50%; }
+.adaptive-toggle span { display: flex; min-width: 0; flex-direction: column; gap: 5px; }
+.adaptive-toggle b { color: inherit; font: 500 8px/1 "DM Mono", monospace; letter-spacing: .12em; }
+.adaptive-toggle small { overflow: hidden; color: #65635d; font: 400 8px/1 "DM Mono", monospace; letter-spacing: .08em; text-overflow: ellipsis; white-space: nowrap; }
+.adaptive-toggle.active { color: var(--ink); }
+.adaptive-toggle.active i { border-color: var(--accent); background: var(--accent); box-shadow: 0 0 12px rgba(239,158,71,.35); }
+.adaptive-strip > label { display: flex; align-items: center; gap: 12px; padding: 13px 18px; color: #77746d; font: 400 8px/1 "DM Mono", monospace; letter-spacing: .1em; }
+.adaptive-strip > label input { min-width: 70px; width: 100%; accent-color: var(--accent); }
+.adaptive-strip > label small { min-width: 26px; color: var(--accent-bright); }
 .playlist-head, .playlist-track {
   display: grid;
-  grid-template-columns: 54px minmax(190px, 1fr) 76px 62px 122px 136px 106px;
+  grid-template-columns: 50px minmax(170px, 1fr) 72px 58px 58px 116px 130px 100px;
   align-items: center;
   gap: 12px;
 }
@@ -388,8 +400,9 @@ body.recording .record-button i { animation: recordPulse 1.2s ease-in-out infini
 .playlist-track:hover { background: rgba(255,255,255,.018); }
 .playlist-track.current { color: var(--accent-bright); background: rgba(239,158,71,.035); }
 .playlist-track.current::before { content: ""; position: absolute; left: 0; top: 12px; bottom: 12px; width: 1px; background: var(--accent); }
-.track-order, .track-key, .track-time, .track-status { font: 400 9px/1 "DM Mono", monospace; letter-spacing: .08em; }
+.track-order, .track-key, .track-bpm, .track-time, .track-status { font: 400 9px/1 "DM Mono", monospace; letter-spacing: .08em; }
 .track-order, .track-time { color: #66645d; }
+.track-bpm { color: #8c8981; }
 .track-title-button { overflow: hidden; padding: 8px 0; border: 0; background: transparent; color: inherit; text-align: left; text-overflow: ellipsis; white-space: nowrap; cursor: pointer; }
 .track-title-button:disabled { color: #6b6962; cursor: not-allowed; }
 .track-key { color: var(--accent-bright); }
@@ -455,10 +468,12 @@ dialog p { color: var(--muted); line-height: 1.65; }
   .timeline { grid-template-columns: 38px 1fr 38px; }
   .timeline label { grid-column: 1 / -1; padding-top: 8px; }
   .timeline-toggle { grid-column: 1 / -1; }
+  .adaptive-strip { grid-template-columns: 1fr; }
+  .adaptive-toggle { border-right: 0; border-bottom: 1px solid var(--line); }
   .playlist-head { display: none; }
   .playlist { margin-top: 30px; }
   .playlist-track { grid-template-columns: 34px minmax(0, 1fr) 64px; gap: 8px; }
-  .track-time, .track-status { display: none; }
+  .track-bpm, .track-time, .track-status { display: none; }
   .preset-cue { grid-column: 2 / -1; }
   .row-actions { grid-column: 2 / -1; justify-content: flex-start; margin-top: -4px; }
 }

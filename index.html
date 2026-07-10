@@ -148,8 +148,15 @@
             <label for="crossfadeSeconds">TIME <input id="crossfadeSeconds" type="range" min="2" max="12" value="6" step="1" /><small id="crossfadeValue">6s</small></label>
           </div>
 
+          <div class="adaptive-strip disabled" id="adaptiveStrip">
+            <button class="adaptive-toggle active" id="impulseButton" aria-pressed="true"><i></i><span><b>IMPULSE TEXTURE</b><small id="impulseStatus">WAITING FOR BPM</small></span></button>
+            <button class="adaptive-toggle active" id="breathButton" aria-pressed="true"><i></i><span><b>BREATH MODULATION</b><small id="breathStatus">PRESET-LED</small></span></button>
+            <button class="adaptive-toggle active" id="spatialButton" aria-pressed="true"><i></i><span><b>SPATIAL MOTION</b><small id="spatialStatus">ADAPTIVE WIDTH</small></span></button>
+            <label for="textureIntensity"><span>TEXTURE</span><input id="textureIntensity" type="range" min="0" max="1" value="0.28" step="0.01" /><small id="textureValue">28%</small></label>
+          </div>
+
           <div class="playlist-head" aria-hidden="true">
-            <span>ORDER</span><span>TRACK</span><span>KEY</span><span>TIME</span><span>ANALYSIS</span><span>STATE CUE</span><span></span>
+            <span>ORDER</span><span>TRACK</span><span>KEY</span><span>BPM</span><span>TIME</span><span>ANALYSIS</span><span>STATE CUE</span><span></span>
           </div>
           <div class="playlist" id="playlist" aria-label="Local set">
             <div class="playlist-empty">Your ordered set will appear here.</div>
@@ -165,7 +172,7 @@
       <p class="eyebrow">HOW IT WORKS</p>
       <h2>A difference you can hear.</h2>
       <p>Phase sends a slightly different tone to each ear. Your brain perceives the frequency gap as a gentle rhythmic pulse. The ten faders mix harmonic carrier pairs for a richer sound.</p>
-      <p>Load an ordered local set and analyse it in one pass. Phase estimates each track's key and loudness envelope, then can record the complete music, crossfades, cues, and binaural layer into one local file. Your files never leave the browser.</p>
+      <p>Load an ordered local set and analyse it in one pass. Phase estimates each track's key, BPM, beat phase, and loudness envelope. Reliable rhythms can drive sparse impulse texture and phrase-locked breathing; ambiguous tracks use continuous air instead. Record the complete music, crossfades, cues, texture, and binaural layer into one local file. Your files never leave the browser.</p>
       <p class="fine-print">Use stereo headphones at a comfortable volume. This is a relaxation and focus tool, not a medical treatment. Do not use while driving.</p>
     </dialog>
 
