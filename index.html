@@ -96,17 +96,24 @@
 
         <div class="music-block">
           <div class="section-heading">
-            <p class="eyebrow">LOCAL MUSIC</p>
-            <span>ON-DEVICE ANALYSIS</span>
+            <div>
+              <p class="eyebrow">LOCAL SET</p>
+              <span id="setSummary">0 TRACKS · ON-DEVICE</span>
+            </div>
+            <div class="set-actions">
+              <input id="audioFile" type="file" accept="audio/*,.mp3,.m4a,.wav,.aac,.flac,.ogg" multiple hidden />
+              <label class="load-button" for="audioFile"><span>＋</span> ADD FILES</label>
+              <button class="set-button" id="analyseSetButton" disabled>ANALYSE SET</button>
+              <button class="set-button quiet" id="clearSetButton" disabled>CLEAR</button>
+            </div>
           </div>
 
           <div class="music-workspace">
             <div class="track-loader">
-              <input id="audioFile" type="file" accept="audio/*,.mp3,.m4a,.wav,.aac,.flac,.ogg" hidden />
-              <label class="load-button" for="audioFile"><span>＋</span> LOAD AUDIO</label>
+              <span class="now-index" id="nowIndex">—</span>
               <div class="track-copy">
                 <strong id="trackName">No track loaded</strong>
-                <span id="trackMeta">MP3, M4A, WAV, AAC, FLAC OR OGG · FILE STAYS ON THIS DEVICE</span>
+                <span id="trackMeta">ADD LOCAL AUDIO FILES TO BUILD A SET</span>
               </div>
             </div>
 
@@ -133,6 +140,13 @@
             <span id="duration">0:00</span>
             <label for="musicVolume">MUSIC <input id="musicVolume" type="range" min="0" max="1" value="0.8" step="0.01" /></label>
           </div>
+
+          <div class="playlist-head" aria-hidden="true">
+            <span>ORDER</span><span>TRACK</span><span>KEY</span><span>TIME</span><span>STATUS</span><span></span>
+          </div>
+          <div class="playlist" id="playlist" aria-label="Local set">
+            <div class="playlist-empty">Your ordered set will appear here.</div>
+          </div>
           <audio id="musicPlayer" preload="metadata"></audio>
         </div>
       </section>
@@ -143,7 +157,7 @@
       <p class="eyebrow">HOW IT WORKS</p>
       <h2>A difference you can hear.</h2>
       <p>Phase sends a slightly different tone to each ear. Your brain perceives the frequency gap as a gentle rhythmic pulse. The ten faders mix harmonic carrier pairs for a richer sound.</p>
-      <p>When local music is loaded, Phase estimates its key from a rolling chroma profile and can glide the carrier toward the detected root or fifth. Your file never leaves the browser.</p>
+      <p>Load an ordered local set and analyse it in one pass. Phase estimates each track's key and can glide the carrier toward the detected root or fifth as the playlist advances. Your files never leave the browser.</p>
       <p class="fine-print">Use stereo headphones at a comfortable volume. This is a relaxation and focus tool, not a medical treatment. Do not use while driving.</p>
     </dialog>
 
