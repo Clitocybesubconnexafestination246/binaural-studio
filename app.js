@@ -9,10 +9,11 @@ const presets = [
 ];
 
 const knobColors = ["#ff815d", "#f5a24b", "#e9c857", "#b8d967", "#68d598", "#54d5c4", "#59c0ea", "#7393f2", "#a579e8", "#dd79bb"];
-const state = { preset: 3, beat: 8, carrier: 130, volume: .35, wave: "sine", levels: [...presets[3].levels], playing: false, autoMatch: true, autoLevel: true, toneScale: 1, relation: 0, crossfade: true, crossfadeSeconds: 6, impulse: true, air: true, breathing: true, spatial: true, textureIntensity: .28, impulseAmount: .5 };
+const state = { preset: 3, beat: 8, carrier: 130, volume: .35, wave: "sine", levels: [...presets[3].levels], playing: false, autoMatch: true, autoLevel: true, toneScale: 1, relation: 0, crossfade: true, crossfadeSeconds: 6, impulse: true, air: true, breathing: true, spatial: true, textureIntensity: .28, impulseAmount: .5, eq: { low: 0, mid: 0, high: 0 } };
 let audioContext, masterGain;
 const voices = [];
 const musicSources = [], musicGains = [];
+let musicEqLow, musicEqMid, musicEqHigh;
 let activeDeck = 0, crossfadeInProgress = false, crossfadeTimer, crossfadeToneTarget;
 let detectedRoot = null;
 let recordDestination, mediaRecorder, recordedChunks = [], recordingWritable, recordingWriteQueue = Promise.resolve(), isRecording = false, saveRecordingOnStop = true;
@@ -151,16 +152,46 @@ function createAirBed() {
 
 function connectMusicSources() {
   if (!audioContext || musicSources.length) return;
+  musicEqLow = audioContext.createBiquadFilter();
+  musicEqLow.type = "lowshelf";
+  musicEqLow.frequency.value = 120;
+  musicEqMid = audioContext.createBiquadFilter();
+  musicEqMid.type = "peaking";
+  musicEqMid.frequency.value = 1000;
+  musicEqMid.Q.value = .8;
+  musicEqHigh = audioContext.createBiquadFilter();
+  musicEqHigh.type = "highshelf";
+  musicEqHigh.frequency.value = 8000;
+  musicEqLow.connect(musicEqMid).connect(musicEqHigh);
+  musicEqHigh.connect(audioContext.destination);
+  musicEqHigh.connect(recordDestination);
+  updateMusicEq(true);
   deckPlayers().forEach((player, deck) => {
     const source = audioContext.createMediaElementSource(player);
     const gain = audioContext.createGain();
     gain.gain.value = deck === activeDeck ? Number($("musicVolume").value) : 0;
     source.connect(gain);
-    gain.connect(audioContext.destination);
-    gain.connect(recordDestination);
+    gain.connect(musicEqLow);
     musicSources.push(source);
     musicGains.push(gain);
   });
+}
+
+function updateMusicEq(immediate = false) {
+  if (!audioContext || !musicEqLow) return;
+  [[musicEqLow, state.eq.low], [musicEqMid, state.eq.mid], [musicEqHigh, state.eq.high]].forEach(([filter, value]) => {
+    filter.gain.cancelScheduledValues(audioContext.currentTime);
+    filter.gain.setTargetAtTime(value, audioContext.currentTime, immediate ? .01 : .04);
+  });
+}
+
+function syncEqControl(band) {
+  const input = $(`eq${band[0].toUpperCase()}${band.slice(1)}`);
+  const value = Number(input.value);
+  state.eq[band] = value;
+  input.parentElement.querySelector(".eq-dial").style.setProperty("--eq-angle", `${value / 12 * 135}deg`);
+  $(`${input.id}Value`).textContent = `${value > 0 ? "+" : ""}${value.toFixed(1)} dB`;
+  updateMusicEq();
 }
 
 function setDeckGain(deck, value, glide = .04) {
@@ -768,6 +799,7 @@ function resetCurrentTrackUI() {
   updateAdaptiveStatus(null);
   $("trackPosition").disabled = true;
   $("timeline").classList.add("disabled");
+  $("trackEq").classList.add("disabled");
   $("currentTime").textContent = "0:00";
   $("duration").textContent = "0:00";
   $("trackPosition").value = 0;
@@ -807,6 +839,7 @@ function presentTrack(index, applyAudio = true) {
   $("autoLevelButton").disabled = !track.envelope;
   $("trackPosition").disabled = false;
   $("timeline").classList.remove("disabled");
+  $("trackEq").classList.remove("disabled");
   if (track.tonic == null) {
     detectedRoot = null;
     $("detectedKey").textContent = "…";
@@ -1480,6 +1513,14 @@ $("trackPosition").addEventListener("input", (event) => {
 });
 $("musicVolume").addEventListener("input", (event) => {
   if (!crossfadeInProgress) setDeckGain(activeDeck, Number(event.target.value), .04);
+});
+[["eqLow", "low"], ["eqMid", "mid"], ["eqHigh", "high"]].forEach(([id, band]) => {
+  const input = $(id);
+  input.addEventListener("input", () => syncEqControl(band));
+  input.addEventListener("dblclick", () => {
+    input.value = 0;
+    syncEqControl(band);
+  });
 });
 $("crossfadeButton").addEventListener("click", () => {
   state.crossfade = !state.crossfade;

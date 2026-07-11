@@ -148,6 +148,13 @@
             <label for="crossfadeSeconds">TIME <input id="crossfadeSeconds" type="range" min="2" max="12" value="6" step="1" /><small id="crossfadeValue">6s</small></label>
           </div>
 
+          <div class="track-eq disabled" id="trackEq" aria-label="Music equalizer">
+            <div class="eq-heading"><span>TRACK EQ</span><small>MUSIC ONLY · DOUBLE-CLICK TO RESET</small></div>
+            <label class="eq-control" for="eqLow"><input id="eqLow" type="range" min="-12" max="12" value="0" step="0.5" aria-label="Low EQ gain" /><i class="eq-dial" style="--eq-angle:0deg"><b></b></i><span>LOW<small id="eqLowValue">0.0 dB</small></span></label>
+            <label class="eq-control" for="eqMid"><input id="eqMid" type="range" min="-12" max="12" value="0" step="0.5" aria-label="Mid EQ gain" /><i class="eq-dial" style="--eq-angle:0deg"><b></b></i><span>MID<small id="eqMidValue">0.0 dB</small></span></label>
+            <label class="eq-control" for="eqHigh"><input id="eqHigh" type="range" min="-12" max="12" value="0" step="0.5" aria-label="High EQ gain" /><i class="eq-dial" style="--eq-angle:0deg"><b></b></i><span>HIGH<small id="eqHighValue">0.0 dB</small></span></label>
+          </div>
+
           <div class="adaptive-strip disabled" id="adaptiveStrip">
             <button class="adaptive-toggle active" id="impulseButton" aria-pressed="true"><i></i><span><b>IMPULSE TEXTURE</b><small id="impulseStatus">WAITING FOR WAVEFORM</small></span></button>
             <button class="adaptive-toggle active" id="airButton" aria-pressed="true"><i></i><span><b>AIR BED</b><small id="airStatus">WAITING FOR AUDIO</small></span></button>
