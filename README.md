@@ -2,6 +2,8 @@
 
 A standalone binaural beat generator and local music player built with the Web Audio API. It includes ten harmonic carrier pairs, seven brainwave-state presets, per-harmonic mixing, adjustable beat and carrier frequencies, two oscillator shapes, offline key/BPM analysis, automatic carrier matching, adaptive impulse noise, and a responsive animated interface.
 
+The manual binaural studio is collapsed on launch so the local-set workflow stays immediately visible. Its compact header retains the active state, beat frequency, playback transport, and recording action; expand **Manual tone controls** whenever presets, signal controls, or the harmonic mixer are needed.
+
 ## Local sets and carrier matching
 
 Load multiple MP3, M4A, WAV, AAC, FLAC, or OGG files from the **Local Set** section. Files stay on the device. Phase decodes and analyses every track before playback, samples its complete timeline into a chroma profile, estimates the musical key, and displays a fixed per-track confidence result.

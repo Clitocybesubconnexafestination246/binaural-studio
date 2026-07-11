@@ -92,13 +92,39 @@ button { color: inherit; }
 .icon-button:hover { border-color: var(--accent); transform: rotate(8deg); }
 
 .studio {
+  position: relative;
   min-height: calc(100svh - 82px);
   padding: clamp(46px, 6vh, 80px) 4vw 36px;
   display: grid;
   grid-template-columns: minmax(240px, 0.8fr) minmax(560px, 1.6fr) minmax(180px, 0.6fr);
   grid-template-rows: auto 1fr auto;
   column-gap: 4vw;
+  transition: min-height 420ms cubic-bezier(.22,.8,.26,1), padding 420ms cubic-bezier(.22,.8,.26,1), background 240ms ease;
 }
+
+.studio-summary { display: none; }
+.studio-toggle { position: absolute; z-index: 4; top: 26px; right: 4vw; display: flex; align-items: center; gap: 18px; padding: 10px 0 10px 14px; border: 0; background: transparent; color: var(--muted); text-align: right; cursor: pointer; }
+.studio-toggle-copy { display: flex; flex-direction: column; gap: 5px; }
+.studio-toggle-copy b { color: var(--ink); font: 500 8px/1 "DM Mono", monospace; letter-spacing: .14em; }
+.studio-toggle-copy small { color: #67655e; font: 400 7px/1 "DM Mono", monospace; letter-spacing: .1em; }
+.studio-toggle i { position: relative; width: 30px; height: 30px; border: 1px solid var(--line); border-radius: 50%; transition: border-color 180ms ease, transform 300ms cubic-bezier(.22,.8,.26,1); }
+.studio-toggle i::before, .studio-toggle i::after { content: ""; position: absolute; top: 14px; left: 9px; width: 10px; height: 1px; background: var(--accent); }
+.studio-toggle i::after { transform: rotate(90deg); transition: transform 240ms ease; }
+.studio-toggle[aria-expanded="true"] i { transform: rotate(180deg); }
+.studio-toggle[aria-expanded="true"] i::after { transform: rotate(0); }
+.studio-toggle:hover i { border-color: var(--accent); }
+
+.studio.collapsed { min-height: 96px; padding: 16px 4vw; grid-template-columns: minmax(180px, .5fr) 1fr auto; grid-template-rows: 64px; align-items: center; column-gap: 24px; background: rgba(8,8,6,.82); border-bottom: 1px solid var(--line); backdrop-filter: blur(14px); }
+.studio.collapsed .title-lockup, .studio.collapsed .frequency-readout, .studio.collapsed .mixer-wrap { display: none; }
+.studio.collapsed .studio-summary { display: flex; grid-column: 1; flex-direction: column; gap: 7px; }
+.studio-summary > span { color: var(--accent); font: 500 8px/1 "DM Mono", monospace; letter-spacing: .14em; }
+.studio-summary strong { color: var(--ink); font: 400 12px/1 "DM Mono", monospace; letter-spacing: .08em; }
+.studio.collapsed .transport { grid-column: 2; grid-row: 1; min-width: 0; padding: 0; border: 0; }
+.studio.collapsed .play-button { width: 48px; height: 48px; flex-basis: 48px; }
+.studio.collapsed .play-icon { top: 16px; left: 20px; border-left-width: 12px; border-top-width: 8px; border-bottom-width: 8px; }
+.studio.collapsed .pause-icon i { height: 16px; }
+.studio.collapsed .transport-status { min-width: 120px; }
+.studio.collapsed .studio-toggle { position: static; grid-column: 3; grid-row: 1; }
 
 .title-lockup { max-width: 440px; animation: rise 700ms cubic-bezier(.22,.8,.26,1) both; }
 .eyebrow { margin: 0 0 16px; color: var(--accent); font-size: 10px; font-weight: 500; }
@@ -449,6 +475,9 @@ dialog p { color: var(--muted); line-height: 1.65; }
   .fader-track { height: 250px; }
   .fader { width: 250px; margin-left: -125px; }
   .transport { grid-row: 3; }
+  .studio.collapsed { grid-template-columns: auto 1fr auto; grid-template-rows: 64px; }
+  .studio.collapsed .transport { grid-row: 1; }
+  .studio.collapsed .record-button span, .studio.collapsed .utility-button:not(.record-button) { display: none; }
 }
 
 @media (max-width: 680px) {
@@ -456,6 +485,13 @@ dialog p { color: var(--muted); line-height: 1.65; }
   .headphone-note { display: none; }
   .topbar { grid-template-columns: 1fr auto; }
   .studio { min-height: auto; padding: 34px 18px 28px; grid-template-columns: 1fr; }
+  .studio-toggle { top: 18px; right: 18px; }
+  .studio.collapsed { min-height: 146px; padding: 16px 18px; grid-template-columns: 1fr auto; grid-template-rows: auto 58px; gap: 4px 12px; }
+  .studio.collapsed .studio-summary { grid-column: 1; grid-row: 1; }
+  .studio.collapsed .studio-toggle { grid-column: 2; grid-row: 1; padding-right: 0; }
+  .studio.collapsed .studio-toggle-copy { display: none; }
+  .studio.collapsed .transport { grid-column: 1 / -1; grid-row: 2; }
+  .studio.collapsed .transport-status { min-width: 70px; }
   .title-lockup { grid-column: 1; }
   .frequency-readout { grid-column: 1; align-items: flex-start; justify-self: start; margin-top: 38px; }
   .frequency-readout strong { font-size: 68px; }

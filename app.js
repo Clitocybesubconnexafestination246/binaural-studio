@@ -616,6 +616,8 @@ function syncFaders() {
 
 function updateReadouts(name = state.preset >= 0 ? presets[state.preset].name : "Custom") {
   $("beatReadout").textContent = state.beat.toFixed(1);
+  $("collapsedBeatReadout").textContent = state.beat.toFixed(1);
+  $("collapsedStateName").textContent = name.toUpperCase();
   $("beatValue").textContent = `${state.beat.toFixed(1)} Hz`;
   $("carrierValue").textContent = `${Math.round(state.carrier)} Hz`;
   $("waveName").textContent = waveBand(state.beat);
@@ -1401,6 +1403,11 @@ function matchCarrierToKey() {
 }
 
 $("playButton").addEventListener("click", togglePlay);
+$("studioToggle").addEventListener("click", () => {
+  const collapsed = $("studio").classList.toggle("collapsed");
+  $("studioToggle").setAttribute("aria-expanded", String(!collapsed));
+  $("studioToggle").querySelector("b").textContent = collapsed ? "MANUAL TONE CONTROLS" : "HIDE MANUAL CONTROLS";
+});
 $("beatFrequency").addEventListener("input", (event) => {
   state.beat = Number(event.target.value); markCustom(); updateAudioParams();
 });

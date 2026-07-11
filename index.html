@@ -28,7 +28,15 @@
     </header>
 
     <main>
-      <section class="studio" aria-labelledby="pageTitle">
+      <section class="studio collapsed" id="studio" aria-labelledby="pageTitle">
+        <div class="studio-summary" aria-hidden="true">
+          <span>BINAURAL STUDIO</span>
+          <strong><span id="collapsedStateName">CALM</span> · <span id="collapsedBeatReadout">8.0</span> HZ</strong>
+        </div>
+        <button class="studio-toggle" id="studioToggle" aria-controls="studio" aria-expanded="false">
+          <span class="studio-toggle-copy"><b>MANUAL TONE CONTROLS</b><small>PRESETS · SIGNAL · HARMONICS</small></span>
+          <i aria-hidden="true"></i>
+        </button>
         <div class="title-lockup">
           <p class="eyebrow">BINAURAL STUDIO / 01</p>
           <h1 id="pageTitle">Tune your state.</h1>
