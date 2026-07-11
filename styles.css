@@ -368,7 +368,7 @@ body.recording .record-button i { animation: recordPulse 1.2s ease-in-out infini
 .timeline-toggle i { width: 7px; height: 7px; border-radius: 50%; background: #55534d; }
 .timeline-toggle.active { color: var(--ink); border-color: rgba(239,158,71,.4); }
 .timeline-toggle.active i { background: var(--accent); box-shadow: 0 0 12px rgba(239,158,71,.5); }
-.adaptive-strip { display: grid; grid-template-columns: repeat(3, minmax(180px, 1fr)) minmax(180px, .7fr); gap: 0; margin-top: 24px; border-top: 1px solid var(--line); border-bottom: 1px solid var(--line); transition: opacity 180ms ease; }
+.adaptive-strip { display: grid; grid-template-columns: repeat(4, minmax(140px, 1fr)) repeat(2, minmax(145px, .72fr)); gap: 0; margin-top: 24px; border-top: 1px solid var(--line); border-bottom: 1px solid var(--line); transition: opacity 180ms ease; }
 .adaptive-strip.disabled { opacity: .35; }
 .adaptive-toggle { display: flex; align-items: center; gap: 11px; min-height: 66px; padding: 13px 18px; border: 0; border-right: 1px solid var(--line); background: transparent; color: #77746d; text-align: left; cursor: pointer; }
 .adaptive-toggle i { width: 8px; height: 8px; flex: 0 0 auto; border: 1px solid #66635d; border-radius: 50%; }

@@ -9,7 +9,7 @@ const presets = [
 ];
 
 const knobColors = ["#ff815d", "#f5a24b", "#e9c857", "#b8d967", "#68d598", "#54d5c4", "#59c0ea", "#7393f2", "#a579e8", "#dd79bb"];
-const state = { preset: 3, beat: 8, carrier: 130, volume: .35, wave: "sine", levels: [...presets[3].levels], playing: false, autoMatch: true, autoLevel: true, toneScale: 1, relation: 0, crossfade: true, crossfadeSeconds: 6, impulse: true, breathing: true, spatial: true, textureIntensity: .28 };
+const state = { preset: 3, beat: 8, carrier: 130, volume: .35, wave: "sine", levels: [...presets[3].levels], playing: false, autoMatch: true, autoLevel: true, toneScale: 1, relation: 0, crossfade: true, crossfadeSeconds: 6, impulse: true, air: true, breathing: true, spatial: true, textureIntensity: .28, impulseAmount: .5 };
 let audioContext, masterGain;
 const voices = [];
 const musicSources = [], musicGains = [];
@@ -21,7 +21,7 @@ let currentTrackIndex = -1, trackSequence = 0, isAnalysingSet = false;
 const KEY_CONFIDENCE_THRESHOLD = .22;
 const BPM_CONFIDENCE_THRESHOLD = .3;
 const breathingRates = [4.5, 5, 5.5, 6, 6.5, 7, 8];
-let adaptiveGain, airSource, airGain, airFilter, airPanner, impulseTimer, nextRainTime = null, rainActive = false;
+let adaptiveGain, airSource, airGain, airFilter, airPanner, impulseTimer, nextRainTime = null, rainActive = false, texturePresence = 0, textureHoldUntil = 0;
 
 const noteNames = ["C", "C♯", "D", "E♭", "E", "F", "F♯", "G", "A♭", "A", "B♭", "B"];
 const majorProfile = [6.35, 2.23, 3.48, 2.33, 4.38, 4.09, 2.52, 5.19, 2.39, 3.66, 2.29, 2.88];
@@ -176,12 +176,21 @@ function trackEnergyAt(track, time) {
   return track.envelope.values[index];
 }
 
+function trackLoudnessScale(track) {
+  return track?.envelope?.loudnessScale || 1;
+}
+
+function loudnessReadout(track) {
+  const loudness = track?.envelope?.integratedDb;
+  return Number.isFinite(loudness) ? `${loudness.toFixed(1)} DB AVG` : "LOUDNESS PENDING";
+}
+
 function textureOpportunityAt(track, time) {
   if (!track?.envelope?.values?.length) return 0;
   const values = track.envelope.values;
   const pointsPerSecond = track.envelope.pointsPerSecond;
   const centre = Math.max(0, Math.min(values.length - 1, Math.floor(time * pointsPerSecond)));
-  const radius = Math.max(1, Math.ceil(pointsPerSecond * 1.25));
+  const radius = Math.max(1, Math.ceil(pointsPerSecond * 1.6));
   let sum = 0, peak = 0, count = 0;
   for (let index = Math.max(0, centre - radius); index <= Math.min(values.length - 1, centre + radius); index++) {
     sum += values[index];
@@ -189,8 +198,10 @@ function textureOpportunityAt(track, time) {
     count += 1;
   }
   const contextualEnergy = (sum / count) * .72 + peak * .28;
-  const quietness = Math.max(0, Math.min(1, (.42 - contextualEnergy) / .32));
-  if (quietness <= .18) return 0;
+  const threshold = .44 + state.impulseAmount * .18;
+  const range = .34 + state.impulseAmount * .14;
+  const quietness = Math.max(0, Math.min(1, (threshold - contextualEnergy) / range));
+  if (quietness <= .12 - state.impulseAmount * .06) return 0;
 
   // Very quiet passages always qualify. Moderately quiet passages use stable,
   // track-specific five-second windows so the texture visits rather than carpets.
@@ -198,7 +209,8 @@ function textureOpportunityAt(track, time) {
   const trackSeed = Number(String(track.id || "0").replace(/\D/g, "")) || 1;
   const windowIndex = Math.floor(time / 5.25);
   const pseudoRandom = Math.sin((trackSeed * 37 + windowIndex * 101) * 12.9898) * 43758.5453;
-  return pseudoRandom - Math.floor(pseudoRandom) < .42 ? quietness : 0;
+  const windowChance = .38 + state.impulseAmount * .5;
+  return pseudoRandom - Math.floor(pseudoRandom) < windowChance ? quietness : 0;
 }
 
 function breathingPlan(track = playlist[currentTrackIndex]) {
@@ -223,16 +235,16 @@ function breathingScale(track, time) {
 function updateAdaptiveStatus(track = playlist[currentTrackIndex]) {
   const ready = track?.status === "analysed";
   $("adaptiveStrip").classList.toggle("disabled", !ready);
-  ["impulseButton", "breathButton", "spatialButton"].forEach((id) => { $(id).disabled = !ready; });
+  ["impulseButton", "airButton", "breathButton", "spatialButton"].forEach((id) => { $(id).disabled = !ready; });
   if (!ready) {
-    $("impulseStatus").textContent = "WAITING FOR BPM";
+    $("impulseStatus").textContent = "WAITING FOR WAVEFORM";
+    $("airStatus").textContent = "WAITING FOR AUDIO";
     $("breathStatus").textContent = "PRESET-LED";
     return;
   }
   const locked = track.bpmConfidence >= BPM_CONFIDENCE_THRESHOLD;
-  $("impulseStatus").textContent = state.impulse
-    ? locked ? "QUIET WINDOWS · ARMED" : "LOW CONF · CONTINUOUS AIR"
-    : "OFF";
+  $("impulseStatus").textContent = state.impulse ? "QUIET WINDOWS · ARMED" : "OFF";
+  $("airStatus").textContent = state.air ? locked ? "CONTINUOUS · SUBTLE" : "CONTINUOUS · LOW CONF LIFT" : "OFF";
   const plan = breathingPlan(track);
   $("breathStatus").textContent = state.breathing ? `${plan.rate.toFixed(1)}/MIN${plan.beats ? ` · ${plan.beats} BEATS` : " · FREE"}` : "OFF";
   $("spatialStatus").textContent = state.spatial ? "ADAPTIVE WIDTH" : "CENTRED";
@@ -245,14 +257,18 @@ function updateAirBed(immediate = false) {
   const quietness = 1 - trackEnergyAt(track, activePlayer().currentTime);
   const crossfadeLift = crossfadeInProgress ? .6 : 0;
   const prominence = Math.max(quietness * .7, crossfadeLift);
-  const target = state.playing && state.impulse && lowConfidence
-    ? state.textureIntensity * (.012 + prominence * .02)
-    : state.playing && state.impulse && crossfadeInProgress ? state.textureIntensity * .024 : 0;
-  airGain.gain.setTargetAtTime(target, audioContext.currentTime, immediate ? .08 : 1.1);
+  const loudnessScale = trackLoudnessScale(track);
+  let target = 0;
+  if (state.playing && state.air) {
+    if (crossfadeInProgress) target = state.textureIntensity * .024;
+    else target = state.textureIntensity * (.007 + prominence * .017) * (lowConfidence ? 1.28 : 1);
+  }
+  const matchedTarget = target * loudnessScale;
+  airGain.gain.setTargetAtTime(matchedTarget, audioContext.currentTime, immediate ? .08 : 1.1);
   airPanner.pan.setTargetAtTime(state.spatial ? Math.sin(activePlayer().currentTime * .14) * .38 : 0, audioContext.currentTime, 1.4);
 }
 
-function scheduleImpulse(when, strength = 1) {
+function scheduleImpulse(when, strength = 1, loudnessScale = 1) {
   if (!audioContext || !adaptiveGain || !state.impulse) return;
   const duration = .009 + Math.random() * .029;
   const resonanceFrequency = 900 + Math.pow(Math.random(), .72) * 5100;
@@ -264,7 +280,8 @@ function scheduleImpulse(when, strength = 1) {
   filter.Q.value = .35 + Math.random() * .45;
   const gain = audioContext.createGain();
   const panner = audioContext.createStereoPanner();
-  const peak = state.textureIntensity * .12 * (.72 + strength * .5) * (.78 + Math.random() * .42);
+  const amountGain = .35 + state.impulseAmount * 1.65;
+  const peak = state.textureIntensity * .12 * amountGain * loudnessScale * (.72 + strength * .5) * (.78 + Math.random() * .42);
   const width = state.spatial ? .48 + Math.random() * .5 : 0;
   const direction = Math.random() < .5 ? -1 : 1;
   gain.gain.setValueAtTime(Math.max(.0002, peak), when);
@@ -278,10 +295,13 @@ function scheduleImpulse(when, strength = 1) {
 function scheduleTransitionTexture(startTime, duration) {
   const pocketStart = startTime + duration * .31;
   const pocketEnd = startTime + duration * .69;
+  const nextTrack = playlist[currentTrackIndex + 1];
+  const transitionLoudness = Math.sqrt(trackLoudnessScale(playlist[currentTrackIndex]) * trackLoudnessScale(nextTrack));
+  const amountRate = .45 + state.impulseAmount * 1.55;
   let when = pocketStart;
   while (when < pocketEnd) {
-    scheduleImpulse(when, .72 + Math.random() * .4);
-    when += .045 + Math.random() * .105;
+    scheduleImpulse(when, .72 + Math.random() * .4, transitionLoudness);
+    when += (.045 + Math.random() * .105) / amountRate;
   }
 }
 
@@ -289,17 +309,25 @@ function scheduleAdaptiveAudio() {
   if (!audioContext || !state.playing) return;
   updateAirBed();
   const track = playlist[currentTrackIndex];
-  if (!state.impulse || crossfadeInProgress || !track?.bpm || track.bpmConfidence < BPM_CONFIDENCE_THRESHOLD) {
+  if (!state.impulse || crossfadeInProgress || !track?.envelope) {
     rainActive = false;
+    texturePresence = 0;
+    textureHoldUntil = 0;
     return;
   }
   const player = activePlayer();
   const now = audioContext.currentTime;
   const horizon = now + .3;
   const opportunity = textureOpportunityAt(track, player.currentTime);
-  if (opportunity <= .18) {
+  if (opportunity > .1) textureHoldUntil = now + 2.8 + state.impulseAmount * 6;
+  const heldOpportunity = now < textureHoldUntil ? Math.max(.26, opportunity) : opportunity;
+  const targetPresence = heldOpportunity > .1 ? heldOpportunity : 0;
+  const presenceSmoothing = targetPresence > texturePresence ? .16 : .05 - state.impulseAmount * .035;
+  texturePresence += (targetPresence - texturePresence) * presenceSmoothing;
+  if (texturePresence <= .025) {
     if (rainActive) $("impulseStatus").textContent = "QUIET WINDOWS · ARMED";
     rainActive = false;
+    texturePresence = 0;
     nextRainTime = null;
     return;
   }
@@ -309,10 +337,11 @@ function scheduleAdaptiveAudio() {
   while (nextRainTime <= horizon) {
     const futureTrackTime = player.currentTime + (nextRainTime - now);
     const futureOpportunity = textureOpportunityAt(track, futureTrackTime);
-    if (futureOpportunity <= .18) break;
-    const rate = 6.5 + state.textureIntensity * 10 + futureOpportunity * 2;
-    const strength = .48 + futureOpportunity * .52;
-    scheduleImpulse(nextRainTime, strength);
+    const shapedPresence = Math.max(texturePresence, futureOpportunity * .65);
+    const amountRate = .45 + state.impulseAmount * 1.55;
+    const rate = (5.5 + state.textureIntensity * 9 + shapedPresence * 2) * (.5 + shapedPresence * .5) * amountRate;
+    const strength = .42 + shapedPresence * .58;
+    scheduleImpulse(nextRainTime, strength, trackLoudnessScale(track) * shapedPresence);
     const randomInterval = -Math.log(Math.max(.001, 1 - Math.random())) / rate;
     nextRainTime += Math.max(.026, Math.min(.22, randomInterval));
   }
@@ -322,6 +351,8 @@ function startAdaptiveAudio() {
   clearInterval(impulseTimer);
   nextRainTime = null;
   rainActive = false;
+  texturePresence = 0;
+  textureHoldUntil = 0;
   updateAirBed(true);
   impulseTimer = setInterval(scheduleAdaptiveAudio, 90);
 }
@@ -331,6 +362,8 @@ function stopAdaptiveAudio() {
   impulseTimer = null;
   nextRainTime = null;
   rainActive = false;
+  texturePresence = 0;
+  textureHoldUntil = 0;
   updateAirBed(true);
 }
 
@@ -780,12 +813,14 @@ function presentTrack(index, applyAudio = true) {
     $("keyConfidence").textContent = track.status === "analysing" ? "BULK ANALYSIS IN PROGRESS" : "NOT YET ANALYSED";
     $("matchStatus").textContent = "ANALYSE SET BEFORE PLAYBACK";
   }
-  $("autoLevelStatus").textContent = track.envelope ? `READY · ${Math.round(track.envelope.quietFraction * 100)}% QUIET` : "ANALYSING WAVEFORM";
+  $("autoLevelStatus").textContent = track.envelope ? `READY · ${loudnessReadout(track)} · ${Math.round(track.envelope.quietFraction * 100)}% QUIET` : "ANALYSING WAVEFORM";
   if (state.playing && applyAudio) applyTrackCue(track);
   else if (track.tonic != null) setDetectedKey(track.tonic, track.key, track.confidence, applyAudio);
   applyDynamicToneLevel(applyAudio);
   nextRainTime = null;
   rainActive = false;
+  texturePresence = 0;
+  textureHoldUntil = 0;
   updateAdaptiveStatus(track);
   updateAirBed(true);
   renderPlaylist();
@@ -823,8 +858,8 @@ async function selectTrack(index, autoplay = false) {
   }
 }
 
-function carrierForKey(root, referenceCarrier = state.carrier) {
-  const pitchClass = (root + state.relation) % 12;
+function carrierForRelation(root, relation, referenceCarrier = state.carrier) {
+  const pitchClass = (root + relation) % 12;
   const currentMidi = 69 + 12 * Math.log2(referenceCarrier / 440);
   const candidates = [];
   for (let midi = 42; midi <= 53; midi++) {
@@ -834,6 +869,28 @@ function carrierForKey(root, referenceCarrier = state.carrier) {
   return { pitchClass, frequency: 440 * Math.pow(2, (selected - 69) / 12) };
 }
 
+function lowestCarrierForKey(root, referenceCarrier = state.carrier) {
+  const rootCarrier = carrierForRelation(root, 0, referenceCarrier);
+  const fifthCarrier = carrierForRelation(root, 7, referenceCarrier);
+  return rootCarrier.frequency <= fifthCarrier.frequency
+    ? { ...rootCarrier, relation: 0 }
+    : { ...fifthCarrier, relation: 7 };
+}
+
+function syncRelationUI() {
+  document.querySelectorAll(".relation").forEach((button) => {
+    button.classList.toggle("active", Number(button.dataset.relation) === state.relation);
+    button.disabled = state.autoMatch;
+  });
+}
+
+function applyLowestCarrierRelation(root, referenceCarrier = state.carrier) {
+  const matched = lowestCarrierForKey(root, referenceCarrier);
+  state.relation = matched.relation;
+  syncRelationUI();
+  return matched;
+}
+
 function toneTargetForTrack(track) {
   const cue = track.presetOverride != null ? presets[track.presetOverride] : null;
   const target = {
@@ -841,10 +898,13 @@ function toneTargetForTrack(track) {
     beat: cue ? cue.hz : state.beat,
     carrier: cue ? cue.carrier : state.carrier,
     levels: cue ? [...cue.levels] : [...state.levels],
-    wave: state.wave
+    wave: state.wave,
+    relation: state.relation
   };
   if (state.autoMatch && track.tonic != null && track.confidence >= KEY_CONFIDENCE_THRESHOLD) {
-    target.carrier = carrierForKey(track.tonic, target.carrier).frequency;
+    const matched = lowestCarrierForKey(track.tonic, target.carrier);
+    target.carrier = matched.frequency;
+    target.relation = matched.relation;
   }
   return target;
 }
@@ -882,11 +942,13 @@ function commitToneCrossfade() {
   state.carrier = crossfadeToneTarget.carrier;
   state.levels = [...crossfadeToneTarget.levels];
   state.wave = crossfadeToneTarget.wave;
+  state.relation = crossfadeToneTarget.relation;
   $("beatFrequency").value = state.beat;
   $("carrierFrequency").value = Math.round(state.carrier);
   syncFaders();
   updateReadouts(state.preset >= 0 ? presets[state.preset].name : "Custom");
   [...presetList.children].forEach((element, index) => element.classList.toggle("active", index === state.preset));
+  syncRelationUI();
   crossfadeToneTarget = null;
 }
 
@@ -1142,6 +1204,16 @@ async function analyseLoudnessEnvelope(buffer, channels) {
   const percentile = (value) => sorted[Math.min(sorted.length - 1, Math.floor(sorted.length * value))];
   const low = Math.max(-54, percentile(.12));
   const high = Math.max(low + 8, percentile(.82));
+  let loudnessEnergy = 0, audiblePoints = 0;
+  decibels.forEach((decibelsAtPoint) => {
+    if (decibelsAtPoint <= -58) return;
+    loudnessEnergy += Math.pow(10, decibelsAtPoint / 10);
+    audiblePoints += 1;
+  });
+  const integratedDb = 10 * Math.log10(Math.max(1e-8, loudnessEnergy / Math.max(1, audiblePoints)));
+  // About -14 dBFS RMS is neutral. Preserve modern masters while allowing a
+  // quieter, dynamic master to lower generated layers by as much as ~6 dB.
+  const loudnessScale = Math.max(.5, Math.min(1.08, Math.pow(10, (integratedDb + 14) / 20)));
   const values = new Float32Array(pointCount);
   let quietPoints = 0;
   for (let point = 0; point < pointCount; point++) {
@@ -1172,7 +1244,7 @@ async function analyseLoudnessEnvelope(buffer, channels) {
   for (let point = pointCount - 2; point >= 0; point--) backward[point] = backward[point + 1] + smoothing * (desired[point] - backward[point + 1]);
   const toneValues = new Float32Array(pointCount);
   for (let point = 0; point < pointCount; point++) toneValues[point] = (forward[point] + backward[point]) / 2;
-  return { values, toneValues, pointsPerSecond, quietFraction: quietPoints / pointCount };
+  return { values, toneValues, pointsPerSecond, quietFraction: quietPoints / pointCount, integratedDb, loudnessScale };
 }
 
 async function analyseSet(force = false) {
@@ -1214,7 +1286,7 @@ async function analyseSet(force = false) {
       if (playlist[currentTrackIndex]?.id === track.id) {
         setDetectedKey(track.tonic, track.key, track.confidence);
         $("autoLevelButton").disabled = false;
-        $("autoLevelStatus").textContent = `READY · ${Math.round(track.envelope.quietFraction * 100)}% QUIET`;
+        $("autoLevelStatus").textContent = `READY · ${loudnessReadout(track)} · ${Math.round(track.envelope.quietFraction * 100)}% QUIET`;
         updateAdaptiveStatus(track);
       }
     } catch (error) {
@@ -1251,8 +1323,8 @@ function setDetectedKey(root, label, confidence, applyMatch = true) {
   }
   if (state.autoMatch && reliable && applyMatch) matchCarrierToKey();
   else if (state.autoMatch && reliable) {
-    const matched = carrierForKey(root);
-    $("matchStatus").textContent = `${noteNames[matched.pitchClass]} · ${matched.frequency.toFixed(1)} HZ`;
+    const matched = applyLowestCarrierRelation(root);
+    $("matchStatus").textContent = `${matched.relation === 0 ? "ROOT" : "FIFTH"} · ${noteNames[matched.pitchClass]} · ${matched.frequency.toFixed(1)} HZ`;
   }
   else if (state.autoMatch) $("matchStatus").textContent = `HELD AT ${state.carrier.toFixed(1)} HZ`;
 }
@@ -1264,7 +1336,7 @@ function toneScaleForTrack(track, time) {
   const confidenceScale = track.confidence < KEY_CONFIDENCE_THRESHOLD
     ? .82 + .18 * (track.confidence / KEY_CONFIDENCE_THRESHOLD)
     : 1;
-  return Math.max(.5, Math.min(1, maskingScale * confidenceScale));
+  return Math.max(.28, Math.min(1.08, maskingScale * confidenceScale * trackLoudnessScale(track)));
 }
 
 function currentToneScale() {
@@ -1276,8 +1348,8 @@ function applyDynamicToneLevel(immediate = false) {
   state.toneScale = currentToneScale();
   const percentage = Math.round(state.toneScale * 100);
   const track = playlist[currentTrackIndex];
-  const reason = track?.confidence < KEY_CONFIDENCE_THRESHOLD ? "LOW CONFIDENCE BED" : state.toneScale < .72 ? "QUIET BED" : "CONSTANT BED";
-  $("autoLevelStatus").textContent = state.autoLevel ? `${percentage}% · ${reason}` : "FIXED OUTPUT";
+  const reason = track?.confidence < KEY_CONFIDENCE_THRESHOLD ? "LOW CONFIDENCE BED" : trackLoudnessScale(track) < .78 ? "QUIET MASTER" : state.toneScale < .72 ? "QUIET BED" : "CONSTANT BED";
+  $("autoLevelStatus").textContent = state.autoLevel ? `${percentage}% · ${reason} · ${loudnessReadout(track)}` : "FIXED OUTPUT";
   if (audioContext && state.playing && !crossfadeInProgress) {
     masterGain.gain.setTargetAtTime(state.volume * state.toneScale, audioContext.currentTime, immediate ? .08 : .85);
   }
@@ -1285,9 +1357,9 @@ function applyDynamicToneLevel(immediate = false) {
 
 function matchCarrierToKey() {
   if (detectedRoot == null) return;
-  const matched = carrierForKey(detectedRoot);
+  const matched = applyLowestCarrierRelation(detectedRoot);
   const target = matched.frequency;
-  $("matchStatus").textContent = `${noteNames[matched.pitchClass]} · ${target.toFixed(1)} HZ`;
+  $("matchStatus").textContent = `${matched.relation === 0 ? "ROOT" : "FIFTH"} · ${noteNames[matched.pitchClass]} · ${target.toFixed(1)} HZ`;
   if (Math.abs(target - state.carrier) < .5) return;
   state.carrier = target;
   $("carrierFrequency").value = Math.round(target);
@@ -1426,17 +1498,28 @@ function bindAdaptiveToggle(id, key) {
     $(id).setAttribute("aria-pressed", String(state[key]));
     updateAdaptiveStatus();
     updateAirBed(true);
-    if (key === "impulse") nextRainTime = null;
+    if (key === "impulse") {
+      nextRainTime = null;
+      texturePresence = 0;
+      textureHoldUntil = 0;
+    }
     if (key === "breathing") applyDynamicToneLevel(true);
   });
 }
 bindAdaptiveToggle("impulseButton", "impulse");
+bindAdaptiveToggle("airButton", "air");
 bindAdaptiveToggle("breathButton", "breathing");
 bindAdaptiveToggle("spatialButton", "spatial");
 $("textureIntensity").addEventListener("input", (event) => {
   state.textureIntensity = Number(event.target.value);
   $("textureValue").textContent = `${Math.round(state.textureIntensity * 100)}%`;
   updateAirBed(true);
+});
+$("impulseAmount").addEventListener("input", (event) => {
+  state.impulseAmount = Number(event.target.value);
+  $("impulseAmountValue").textContent = `${Math.round(state.impulseAmount * 100)}%`;
+  // Let a newly increased amount discover the current window immediately.
+  nextRainTime = null;
 });
 $("recordSetButton").addEventListener("click", async () => {
   if (isRecording) {
@@ -1450,6 +1533,7 @@ $("autoMatchButton").addEventListener("click", () => {
   $("autoMatchButton").classList.toggle("active", state.autoMatch);
   $("autoMatchButton").setAttribute("aria-pressed", String(state.autoMatch));
   $("matchStatus").textContent = state.autoMatch ? (detectedRoot == null ? "AWAITING ANALYSIS" : "MATCHING ANALYSED KEY") : "MANUAL CARRIER";
+  syncRelationUI();
   if (state.autoMatch) matchCarrierToKey();
 });
 $("autoLevelButton").addEventListener("click", () => {

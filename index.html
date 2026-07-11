@@ -132,9 +132,9 @@
               <button class="match-button level-button active" id="autoLevelButton" aria-pressed="true" disabled>
                 <i></i><span><b>AUTO-LEVEL BINAURAL</b><small id="autoLevelStatus">WAITING FOR WAVEFORM</small></span>
               </button>
-              <div class="segmented relation-picker" aria-label="Carrier relationship">
-                <button class="relation active" data-relation="0">ROOT</button>
-                <button class="relation" data-relation="7">FIFTH</button>
+              <div class="segmented relation-picker" aria-label="Automatically selected lowest carrier relationship">
+                <button class="relation active" data-relation="0" disabled>ROOT</button>
+                <button class="relation" data-relation="7" disabled>FIFTH</button>
               </div>
             </div>
           </div>
@@ -149,10 +149,12 @@
           </div>
 
           <div class="adaptive-strip disabled" id="adaptiveStrip">
-            <button class="adaptive-toggle active" id="impulseButton" aria-pressed="true"><i></i><span><b>IMPULSE TEXTURE</b><small id="impulseStatus">WAITING FOR BPM</small></span></button>
+            <button class="adaptive-toggle active" id="impulseButton" aria-pressed="true"><i></i><span><b>IMPULSE TEXTURE</b><small id="impulseStatus">WAITING FOR WAVEFORM</small></span></button>
+            <button class="adaptive-toggle active" id="airButton" aria-pressed="true"><i></i><span><b>AIR BED</b><small id="airStatus">WAITING FOR AUDIO</small></span></button>
             <button class="adaptive-toggle active" id="breathButton" aria-pressed="true"><i></i><span><b>BREATH MODULATION</b><small id="breathStatus">PRESET-LED</small></span></button>
             <button class="adaptive-toggle active" id="spatialButton" aria-pressed="true"><i></i><span><b>SPATIAL MOTION</b><small id="spatialStatus">ADAPTIVE WIDTH</small></span></button>
             <label for="textureIntensity"><span>TEXTURE</span><input id="textureIntensity" type="range" min="0" max="1" value="0.28" step="0.01" /><small id="textureValue">28%</small></label>
+            <label for="impulseAmount"><span>MORE IMPULSE</span><input id="impulseAmount" type="range" min="0" max="1" value="0.5" step="0.01" /><small id="impulseAmountValue">50%</small></label>
           </div>
 
           <div class="playlist-head" aria-hidden="true">
@@ -172,7 +174,7 @@
       <p class="eyebrow">HOW IT WORKS</p>
       <h2>A difference you can hear.</h2>
       <p>Phase sends a slightly different tone to each ear. Your brain perceives the frequency gap as a gentle rhythmic pulse. The ten faders mix harmonic carrier pairs for a richer sound.</p>
-      <p>Load an ordered local set and analyse it in one pass. Phase estimates each track's key, BPM, beat phase, and loudness envelope. Sharp spatial impulses visit analysed quiet passages and the centre pocket of crossfades; ambiguous tracks use continuous air instead. Reliable BPM still phrase-locks the breathing layer. Record the complete music, crossfades, cues, texture, and binaural layer into one local file. Your files never leave the browser.</p>
+      <p>Load an ordered local set and analyse it in one pass. Phase estimates each track's key, BPM, beat phase, integrated loudness, and dynamic envelope. Generated layers follow the overall master level, while carrier matching chooses the lower of the key's root and fifth. Independent Impulse and Air controls can run alone or together on any track; More Impulse controls the clacks' abundance. Record the complete music, crossfades, cues, texture, and binaural layer into one local file. Your files never leave the browser.</p>
       <p class="fine-print">Use stereo headphones at a comfortable volume. This is a relaxation and focus tool, not a medical treatment. Do not use while driving.</p>
     </dialog>
 
