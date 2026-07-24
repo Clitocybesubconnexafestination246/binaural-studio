@@ -10,6 +10,9 @@ the generated layer to each track, move between state presets during a set, and
 record the complete result as one audio file. There is no backend, account,
 build step, or audio upload.
 
+**[Launch Binaural Studio →](https://henrygabriels.github.io/binaural-studio/)**
+— no installation required.
+
 > **Use stereo headphones and start at a comfortable volume.** The state
 > presets are creative sound-design tools, not medical treatments.
 
