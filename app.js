@@ -759,7 +759,7 @@ function recordingFormat() {
 
 function recordingFilename(extension) {
   const timestamp = new Date().toISOString().slice(0, 19).replace(/[:T]/g, "-");
-  return `phase-set-${timestamp}.${extension}`;
+  return `binaural-set-${timestamp}.${extension}`;
 }
 
 function downloadRecording(blob, extension) {
@@ -814,7 +814,7 @@ async function startSetRecording() {
       const baseType = actualType.split(";")[0];
       const handle = await window.showSaveFilePicker({
         suggestedName: recordingFilename(extension),
-        types: [{ description: "Phase set recording", accept: { [baseType]: [`.${extension}`] } }]
+        types: [{ description: "Binaural set recording", accept: { [baseType]: [`.${extension}`] } }]
       });
       recordingWritable = await handle.createWritable();
     } catch (error) {

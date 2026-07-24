@@ -1,16 +1,20 @@
-# Phase — Binaural Studio
+# Binaural Studio
 
 A standalone binaural beat generator and two-deck local audio player built with the Web Audio API. It includes ten harmonic carrier pairs, seven brainwave-state presets, per-harmonic mixing, adjustable beat and carrier frequencies, two oscillator shapes, offline key/BPM analysis, automatic carrier matching, adaptive impulse noise, and a responsive animated interface.
+
+## License
+
+[MIT](LICENSE)
 
 The manual binaural studio is collapsed on launch so the local-set workflow stays immediately visible. Its compact header retains the active state, beat frequency, playback transport, and recording action; expand **Manual tone controls** whenever presets, signal controls, or the harmonic mixer are needed.
 
 ## Local sets and carrier matching
 
-Load multiple MP3, M4A, WAV, AAC, FLAC, or OGG files from the **Local Set** section. Files stay on the device. Phase decodes and analyses every track before playback, samples its complete timeline into a chroma profile, estimates the musical key, and displays a fixed per-track confidence result.
+Load multiple MP3, M4A, WAV, AAC, FLAC, or OGG files from the **Local Set** section. Files stay on the device. The studio decodes and analyses every track before playback, samples its complete timeline into a chroma profile, estimates the musical key, and displays a fixed per-track confidence result.
 
 The same preflight pass estimates BPM, pulse confidence, and beat phase. The **Impulse Texture** and continuous **Air Bed** are independent sources and can run separately or together on every track; rhythm confidence never blocks the clacks. Impulses visit sustained quiet passages detected in the whole-track waveform. **More Impulse** raises their level, qualifying-window probability, quietness tolerance, tap rate, minimum hold, and release time together. **Texture** remains the shared adaptive-layer level. Air stays subtle on confident tracks and receives an automatic lift when rhythm confidence is low. Automatic crossfades create a short centre pocket by dipping both songs, lifting the air bed, and concentrating a burst of impulses between them.
 
-**Breath modulation** adds a shallow, slow rise and fall to the binaural bed. Each state has a target breathing rate from 4.5 cycles/minute for Deep Sleep to 8 for Bright Alert. When BPM is reliable, Phase selects a whole musical phrase (8–32 beats) closest to that target, keeping the movement aligned with the track; otherwise it runs freely at the preset rate.
+**Breath modulation** adds a shallow, slow rise and fall to the binaural bed. Each state has a target breathing rate from 4.5 cycles/minute for Deep Sleep to 8 for Bright Alert. When BPM is reliable, the studio selects a whole musical phrase (8–32 beats) closest to that target, keeping the movement aligned with the track; otherwise it runs freely at the preset rate.
 
 Tracks play in the displayed order and automatically advance. Use the arrow controls to reorder the set or remove individual files. The carrier glides to the analysed root or fifth at each transition. The main play button controls both the music and binaural layer; moving the base-carrier slider switches matching back to manual mode.
 
@@ -34,9 +38,9 @@ During an automatic crossfade, the binaural carrier, beat frequency, harmonic ba
 
 ## Recording a set
 
-After every Deck 01 track has been analysed, choose **Play + Rec Set**. Phase rewinds both queues and captures the exact combined Web Audio output—including local music, spoken-word audio and reverb, timed silence, equal-power crossfades, state cues, carrier transitions, impulse texture, and the breathing-modulated binaural layer—in real time. The recorder pauses and resumes with the main transport, stops automatically after both queues finish, and saves one local file. The browser chooses the best available format: M4A/AAC where supported, otherwise WebM/Opus or Ogg/Opus. No microphone permission or upload is involved.
+After every Deck 01 track has been analysed, choose **Play + Rec Set**. The studio rewinds both queues and captures the exact combined Web Audio output—including local music, spoken-word audio and reverb, timed silence, equal-power crossfades, state cues, carrier transitions, impulse texture, and the breathing-modulated binaural layer—in real time. The recorder pauses and resumes with the main transport, stops automatically after both queues finish, and saves one local file. The browser chooses the best available format: M4A/AAC where supported, otherwise WebM/Opus or Ogg/Opus. No microphone permission or upload is involved.
 
-In browsers supporting the File System Access API, Phase asks for the destination first and streams one-second encoded chunks directly to disk throughout the set, keeping memory use essentially constant. Other browsers fall back to assembling the final download in memory. A separate FFmpeg renderer would only be necessary for faster-than-real-time export and would require a manifest/desktop companion to reproduce the browser's resolved track paths and automation.
+In browsers supporting the File System Access API, the app asks for the destination first and streams one-second encoded chunks directly to disk throughout the set, keeping memory use essentially constant. Other browsers fall back to assembling the final download in memory. A separate FFmpeg renderer would only be necessary for faster-than-real-time export and would require a manifest/desktop companion to reproduce the browser's resolved track paths and automation.
 
 ## Run locally
 

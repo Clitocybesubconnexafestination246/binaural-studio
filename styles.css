@@ -48,7 +48,7 @@ button { color: inherit; }
 .topbar {
   height: 82px;
   display: grid;
-  grid-template-columns: 1fr auto 1fr;
+  grid-template-columns: 1fr auto;
   align-items: center;
   padding: 0 4vw;
   border-bottom: 1px solid var(--line);
@@ -56,27 +56,12 @@ button { color: inherit; }
   backdrop-filter: blur(12px);
 }
 
-.brand {
-  display: inline-flex;
-  align-items: center;
-  gap: 12px;
-  width: max-content;
-  color: var(--ink);
-  font: 500 13px/1 "DM Mono", monospace;
-  letter-spacing: 0.28em;
-  text-decoration: none;
-}
-
-.brand-mark { position: relative; width: 24px; height: 18px; }
-.brand-mark i { position: absolute; inset: 0 auto auto 0; width: 18px; height: 18px; border: 1px solid var(--accent); border-radius: 50%; }
-.brand-mark i:last-child { left: 6px; border-color: var(--ink); }
-
 .headphone-note, .eyebrow, .section-heading span, .utility-button, .transport-status, .preset-index {
   font-family: "DM Mono", monospace;
   letter-spacing: 0.13em;
 }
 
-.headphone-note { color: var(--muted); font-size: 10px; }
+.headphone-note { justify-self: start; color: var(--muted); font-size: 10px; }
 .headphone-note span { color: var(--accent); }
 
 .icon-button {
