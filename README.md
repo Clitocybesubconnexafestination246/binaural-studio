@@ -1,59 +1,137 @@
 # Binaural Studio
 
-A standalone binaural beat generator and two-deck local audio player built with the Web Audio API. It includes ten harmonic carrier pairs, seven brainwave-state presets, per-harmonic mixing, adjustable beat and carrier frequencies, two oscillator shapes, offline key/BPM analysis, automatic carrier matching, adaptive impulse noise, and a responsive animated interface.
+A local-first browser studio for building long-form headphone sessions from
+binaural tones, music, adaptive textures, and spoken-word audio.
+
+Binaural Studio combines a ten-voice binaural synthesizer with a local music
+deck, an independent spoken-word deck for audiobooks and other long-form audio,
+and a real-time master recorder. It can analyse your music in the browser, tune
+the generated layer to each track, move between state presets during a set, and
+record the complete result as one audio file. There is no backend, account,
+build step, or audio upload.
+
+> **Use stereo headphones and start at a comfortable volume.** The state
+> presets are creative sound-design tools, not medical treatments.
+
+## What it does
+
+| Area | Capabilities |
+| --- | --- |
+| **Binaural synth** | Seven state presets, ten independently mixed harmonic pairs, 1–40 Hz beat frequency, adjustable carrier, sine/triangle oscillators, and manual output control |
+| **Deck 01 — music** | Local playlist, whole-track key/BPM/loudness analysis, automatic carrier matching, harmonic sorting, per-track state cues, three-band EQ, and equal-power crossfades |
+| **Adaptive layers** | Slow binaural auto-levelling, impulse texture, filtered air bed, breath modulation, and spatial motion shaped by the current track |
+| **Deck 02 — spoken word** | Local audiobook and spoken-word queue with its own volume, convolution reverb, seek position, ordering, and explicit timed silences |
+| **Recording** | Real-time capture of the complete master mix to M4A/AAC, WebM/Opus, or Ogg/Opus, depending on browser support |
+
+You can also use the synthesizer on its own: choose a preset, put on headphones,
+and press play without loading any files.
+
+## Run locally
+
+The app is plain HTML, CSS, and JavaScript with no package dependencies.
+
+```sh
+git clone https://github.com/henrygabriels/binaural-studio.git
+cd binaural-studio
+python3 -m http.server 4173
+```
+
+Open [http://localhost:4173](http://localhost:4173) in a modern browser. A local
+server is recommended instead of opening `index.html` directly.
+
+## Build a session
+
+1. Add music to **Deck 01 / Local Set**.
+2. Select **Analyse Set** to estimate key, BPM, loudness, and quiet passages.
+3. Reorder tracks manually or use **Sort by Key**. Optionally assign a state cue
+   to any track and adjust the crossfade, EQ, or generated layers.
+4. Add an audiobook, podcast, or other spoken-word audio to **Deck 02 / Spoken
+   Word**. Insert exact pauses, or use **Random Gaps** to place a 0.5–2.5 second
+   silence between adjacent audio items.
+5. Press the main transport to listen, or **Play + Rec Set** to rewind both
+   queues and record the session from the beginning.
+
+Recording becomes available after every Deck 01 track has been analysed. The
+main transport pauses and resumes both decks together.
+
+## How the audio is organised
+
+The two user-facing decks are deliberately independent:
+
+- **Deck 01** feeds the music EQ and is the only source used for key, rhythm,
+  loudness, carrier, texture, breathing, state-cue, and crossfade automation.
+- **Deck 02** has its own queue, position, volume, reverb, and silence items. It
+  follows the master transport but does not influence the musical analysis.
+- The **binaural synth** and **adaptive layers** run on their own Web Audio
+  paths.
+- All four paths meet at the recorded master mix and the headphone output.
+
+This keeps spoken-word playback intelligible and predictable without letting it
+retune or reshape the music-driven layers.
+
+## On-device music analysis
+
+Analysis happens before playback and stays inside the browser:
+
+- A whole-track chroma profile estimates musical key and reports a confidence
+  score.
+- An onset envelope estimates tempo, pulse confidence, and beat phase.
+- A loudness and quiet-passage map controls slow binaural levelling and places
+  adaptive texture where it is less likely to mask the track.
+
+For a reliable key estimate, the studio selects the analysed root or fifth in a
+low carrier range and glides there during transitions. Low-confidence results
+leave the previous carrier in place. These are lightweight musical heuristics,
+not studio-grade key or loudness measurements, so unusual or harmonically
+ambiguous material may need manual adjustment.
+
+Automatic crossfades overlap two internal music players for 2–12 seconds. The
+music level, carrier, beat frequency, harmonic mix, state cue, and generated
+texture transition across the same window.
+
+## Audiobooks and other spoken-word formats
+
+Deck 02 is designed for audiobooks and other long-form spoken audio. It accepts
+common browser-decodable files including MP3, M4A/AAC, WAV, FLAC, Ogg/Opus,
+WebM, and M4B. The browser must support the audio codec inside the file; a
+recognised extension alone does not guarantee playback. DRM-protected audiobook
+formats such as Audible AAX cannot be decoded by standard browser audio APIs.
+
+## Recording and privacy
+
+**Play + Rec Set** captures music, EQ, crossfades, binaural tones, adaptive
+layers, spoken-word audio and reverb, and timed silences in real time. It does
+not use the microphone.
+
+When the File System Access API is available, the app asks for a destination and
+streams one-second encoded chunks directly to disk. Otherwise it keeps the
+encoded chunks in memory and starts a download when the set ends. Long sessions
+therefore use more memory in browsers without direct-to-disk access.
+
+Audio files, decoded samples, analysis results, and recordings remain on your
+device. The app has no analytics or server-side component. Its only
+third-party page resources are the UI fonts loaded from Google Fonts.
+
+## Current limitations
+
+- Stereo headphones are required for the intended binaural effect.
+- Sessions and analysis results are not persisted across page reloads.
+- Export is real-time; there is no faster-than-real-time renderer.
+- Playback and recording formats depend on the codecs exposed by the browser.
+- The lightweight key and BPM estimates can be uncertain on sparse, noisy, or
+  harmonically ambiguous audio.
+
+## Project structure
+
+```text
+index.html  Interface and audio elements
+styles.css  Responsive layout and visual system
+app.js      Web Audio graph, analysis, sequencing, and recording
+```
+
+Contributions and bug reports are welcome. The project is intentionally
+dependency-free, so changes should remain usable from a simple static server.
 
 ## License
 
 [MIT](LICENSE)
-
-The manual binaural studio is collapsed on launch so the local-set workflow stays immediately visible. Its compact header retains the active state, beat frequency, playback transport, and recording action; expand **Manual tone controls** whenever presets, signal controls, or the harmonic mixer are needed.
-
-## Local sets and carrier matching
-
-Load multiple MP3, M4A, WAV, AAC, FLAC, or OGG files from the **Local Set** section. Files stay on the device. The studio decodes and analyses every track before playback, samples its complete timeline into a chroma profile, estimates the musical key, and displays a fixed per-track confidence result.
-
-The same preflight pass estimates BPM, pulse confidence, and beat phase. The **Impulse Texture** and continuous **Air Bed** are independent sources and can run separately or together on every track; rhythm confidence never blocks the clacks. Impulses visit sustained quiet passages detected in the whole-track waveform. **More Impulse** raises their level, qualifying-window probability, quietness tolerance, tap rate, minimum hold, and release time together. **Texture** remains the shared adaptive-layer level. Air stays subtle on confident tracks and receives an automatic lift when rhythm confidence is low. Automatic crossfades create a short centre pocket by dipping both songs, lifting the air bed, and concentrating a burst of impulses between them.
-
-**Breath modulation** adds a shallow, slow rise and fall to the binaural bed. Each state has a target breathing rate from 4.5 cycles/minute for Deep Sleep to 8 for Bright Alert. When BPM is reliable, the studio selects a whole musical phrase (8–32 beats) closest to that target, keeping the movement aligned with the track; otherwise it runs freely at the preset rate.
-
-Tracks play in the displayed order and automatically advance. Use the arrow controls to reorder the set or remove individual files. The carrier glides to the analysed root or fifth at each transition. The main play button controls both the music and binaural layer; moving the base-carrier slider switches matching back to manual mode.
-
-## Spoken-word deck
-
-Deck 02 is a separate local queue for narration, podcasts, guided sessions, and audiobooks. It follows the main play/pause transport but has its own playback position, queue order, output volume, and convolution reverb. Add timed silent periods directly, or use **Random gaps** to insert a 0.5–2.5 second pause between every pair of audio files that does not already have silence between them. Silence pauses and resumes accurately with the master transport.
-
-The spoken-word bus is deliberately excluded from musical analysis and generated-layer automation. Key matching, binaural level, adaptive texture, breathing, state cues, and crossfades continue to depend only on Deck 01. Deck 02 is nevertheless routed into the recorded master mix.
-
-Common browser audio formats are supported, including MP3, M4A/AAC, WAV, FLAC, Ogg/Opus, WebM, and browser-decodable M4B files. M4B is an MPEG-4 container, so actual playback depends on the audio codec supported by the current browser. DRM-protected formats such as Audible AAX are not supported by browser audio APIs.
-
-The music path includes a three-band track EQ: Low (120 Hz shelf), Mid (1 kHz bell), and High (8 kHz shelf), each adjustable by ±12 dB. It affects local music playback and the recorded mix without colouring the generated binaural or adaptive layers. Double-click any EQ dial to return it to 0 dB.
-
-Automatic matching compares the analysed key's root and fifth inside a deliberately low carrier octave of roughly 92–175 Hz, then selects whichever candidate is lower in absolute frequency. The relationship indicator updates at each reliable key change. Whole-track waveform analysis also maps quiet and silent passages before playback, allowing the binaural layer to duck smoothly when it would otherwise become exposed. It estimates each file's integrated RMS loudness as a second, independent signal: a quieter or less-compressed master lowers both the binaural bed and adaptive texture relative to the user's chosen controls, avoiding a generated-layer jump between differently mastered tracks. Low-confidence key estimates retain the last reliable carrier instead of forcing a new pitch.
-
-The binaural layer is intentionally a constant bed rather than a reactive gate: it uses several seconds of look-ahead context and slow bidirectional smoothing. Brief dance-music builds, stutters, and drops therefore retain the tone instead of producing rapid pumping; the separate whole-file loudness scale handles differences between masters.
-
-Use **Sort by key** to build a harmonically adjacent running order; uncertain key results are left at the end. **Auto Xfade** overlaps two local playback decks for adjustable 2–12 second transitions. Each playlist row also has a state cue: choose a preset such as Calm or Deep Focus and it will take effect when that track begins, persisting through later tracks marked Continue until another cue changes it.
-
-During an automatic crossfade, the binaural carrier, beat frequency, harmonic balance, and output level interpolate across the same transition window as the music. Reliable key changes therefore keep the pleasing pitch slide without an abrupt reconfiguration at the handoff. Bright Alert uses a 110 Hz carrier and a steeply reduced upper-harmonic mix to keep its 32 Hz beat usable at lower perceived pitch.
-
-## Recording a set
-
-After every Deck 01 track has been analysed, choose **Play + Rec Set**. The studio rewinds both queues and captures the exact combined Web Audio output—including local music, spoken-word audio and reverb, timed silence, equal-power crossfades, state cues, carrier transitions, impulse texture, and the breathing-modulated binaural layer—in real time. The recorder pauses and resumes with the main transport, stops automatically after both queues finish, and saves one local file. The browser chooses the best available format: M4A/AAC where supported, otherwise WebM/Opus or Ogg/Opus. No microphone permission or upload is involved.
-
-In browsers supporting the File System Access API, the app asks for the destination first and streams one-second encoded chunks directly to disk throughout the set, keeping memory use essentially constant. Other browsers fall back to assembling the final download in memory. A separate FFmpeg renderer would only be necessary for faster-than-real-time export and would require a manifest/desktop companion to reproduce the browser's resolved track paths and automation.
-
-## Run locally
-
-No build step or dependencies are required. From this folder, start any static server:
-
-```bash
-python3 -m http.server 4173
-```
-
-Then open `http://localhost:4173` in a modern browser and use stereo headphones.
-
-## Notes
-
-- Browsers require a click before audio can start; use the large play button.
-- Keep the output at a comfortable level.
-- This is a focus and relaxation tool, not a medical treatment.
