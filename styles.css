@@ -247,7 +247,7 @@ body.recording .record-button i { animation: recordPulse 1.2s ease-in-out infini
   background: rgba(8,8,6,.93);
   border-top: 1px solid var(--line);
 }
-.presets-block, .settings-block, .music-block { padding: 56px 4vw 70px; }
+.presets-block, .settings-block, .music-block, .spoken-block { padding: 56px 4vw 70px; }
 .settings-block { border-left: 1px solid var(--line); }
 .section-heading { display: flex; align-items: center; justify-content: space-between; margin-bottom: 30px; }
 .section-heading .eyebrow { margin: 0; }
@@ -291,6 +291,45 @@ body.recording .record-button i { animation: recordPulse 1.2s ease-in-out infini
   border-top: 1px solid var(--line);
   background: linear-gradient(110deg, rgba(239,158,71,.035), transparent 46%);
 }
+
+.spoken-block {
+  position: relative;
+  z-index: 3;
+  border-top: 1px solid var(--line);
+  background: rgba(8,8,6,.96);
+}
+.spoken-heading { margin-bottom: 30px; }
+.spoken-console {
+  display: grid;
+  grid-template-columns: minmax(260px, .9fr) minmax(300px, 1.2fr) minmax(300px, .8fr);
+  align-items: center;
+  min-height: 112px;
+  border-top: 1px solid var(--line);
+  border-bottom: 1px solid var(--line);
+}
+.spoken-now { display: flex; align-items: center; gap: 22px; padding-right: 3vw; }
+.spoken-position { display: grid; grid-template-columns: 38px minmax(150px, 1fr) 38px; align-items: center; gap: 12px; min-height: 72px; padding: 0 3vw; border-left: 1px solid var(--line); border-right: 1px solid var(--line); color: #74716a; font: 400 9px/1 "DM Mono", monospace; transition: opacity 180ms ease; }
+.spoken-position.disabled { opacity: .32; }
+.spoken-position input { width: 100%; accent-color: var(--accent); }
+.spoken-mix { display: grid; gap: 17px; padding-left: 3vw; }
+.spoken-mix label { display: grid; grid-template-columns: 58px 1fr 34px; align-items: center; gap: 12px; color: #77746d; font: 400 8px/1 "DM Mono", monospace; letter-spacing: .1em; }
+.spoken-mix input { width: 100%; accent-color: var(--accent); }
+.spoken-mix small { color: var(--accent-bright); }
+.silence-inserter { display: grid; grid-template-columns: 1fr auto auto auto; align-items: center; gap: 18px; min-height: 76px; margin-top: 24px; padding: 12px 0; border-top: 1px solid var(--line); border-bottom: 1px solid var(--line); }
+.silence-inserter > div { display: flex; flex-direction: column; gap: 6px; }
+.silence-inserter strong { font: 500 9px/1 "DM Mono", monospace; letter-spacing: .13em; }
+.silence-inserter span { color: #65635d; font: 400 8px/1.4 "DM Mono", monospace; letter-spacing: .08em; }
+.silence-inserter label { display: flex; align-items: center; gap: 10px; color: #77746d; font: 400 8px/1 "DM Mono", monospace; letter-spacing: .1em; }
+.silence-inserter input { width: 76px; padding: 9px; border: 1px solid var(--line); color: var(--ink); background: #0c0c09; font: 400 10px/1 "DM Mono", monospace; }
+.spoken-queue-head, .spoken-queue-item { display: grid; grid-template-columns: 50px minmax(220px, 1fr) 100px 80px 112px; align-items: center; gap: 12px; }
+.spoken-queue-head { padding: 38px 12px 12px; color: #55534d; font: 400 8px/1 "DM Mono", monospace; letter-spacing: .13em; }
+.spoken-queue { border-top: 1px solid var(--line); }
+.spoken-queue-item { position: relative; min-height: 58px; padding: 10px 12px; border-bottom: 1px solid var(--line); transition: background 180ms ease, color 180ms ease; }
+.spoken-queue-item:hover { background: rgba(255,255,255,.018); }
+.spoken-queue-item.current { color: var(--accent-bright); background: rgba(239,158,71,.035); }
+.spoken-queue-item.current::before { content: ""; position: absolute; left: 0; top: 12px; bottom: 12px; width: 1px; background: var(--accent); }
+.spoken-kind, .spoken-time { color: #77746d; font: 400 9px/1 "DM Mono", monospace; letter-spacing: .08em; }
+.spoken-kind.silence { color: var(--accent); }
 .music-workspace {
   display: grid;
   grid-template-columns: minmax(300px, 1.25fr) minmax(180px, .5fr) minmax(260px, .8fr);
@@ -502,7 +541,7 @@ dialog p { color: var(--muted); line-height: 1.65; }
   .transport-status { min-width: 90px; }
   .utility-button span { display: none; }
   .controls { grid-template-columns: 1fr; }
-  .presets-block, .settings-block, .music-block { padding: 44px 18px 52px; }
+  .presets-block, .settings-block, .music-block, .spoken-block { padding: 44px 18px 52px; }
   .settings-block { border-left: 0; border-top: 1px solid var(--line); }
   .preset-meta { display: none; }
   .music-block { grid-column: 1; }
@@ -527,6 +566,18 @@ dialog p { color: var(--muted); line-height: 1.65; }
   .track-bpm, .track-time, .track-status { display: none; }
   .preset-cue { grid-column: 2 / -1; }
   .row-actions { grid-column: 2 / -1; justify-content: flex-start; margin-top: -4px; }
+  .spoken-heading { align-items: flex-start; gap: 22px; flex-direction: column; }
+  .spoken-console { grid-template-columns: 1fr; }
+  .spoken-now { padding: 26px 0; }
+  .spoken-position { padding: 24px 0; border: 0; border-top: 1px solid var(--line); border-bottom: 1px solid var(--line); }
+  .spoken-mix { padding: 24px 0; }
+  .silence-inserter { grid-template-columns: 1fr auto; }
+  .silence-inserter .set-button { grid-column: 1 / -1; }
+  .spoken-queue-head { display: none; }
+  .spoken-queue { margin-top: 30px; }
+  .spoken-queue-item { grid-template-columns: 34px minmax(0, 1fr) 64px; gap: 8px; }
+  .spoken-queue-item .spoken-time { display: none; }
+  .spoken-queue-item .row-actions { grid-column: 2 / -1; }
 }
 
 @media (prefers-reduced-motion: reduce) {

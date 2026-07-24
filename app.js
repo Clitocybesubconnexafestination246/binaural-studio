@@ -15,8 +15,12 @@ const voices = [];
 const musicSources = [], musicGains = [];
 let musicEqLow, musicEqMid, musicEqHigh;
 let activeDeck = 0, crossfadeInProgress = false, crossfadeTimer, crossfadeToneTarget;
+const spokenQueue = [];
+let spokenTrackSequence = 0, spokenIndex = -1, spokenSource, spokenOutput, spokenDry, spokenWet, spokenConvolver;
+let spokenSilenceTimer, spokenSilenceRemaining = 0, spokenSilenceStartedAt = 0;
+let musicQueueFinished = false, spokenQueueFinished = true;
 let detectedRoot = null;
-let recordDestination, mediaRecorder, recordedChunks = [], recordingWritable, recordingWriteQueue = Promise.resolve(), isRecording = false, saveRecordingOnStop = true;
+let recordDestination, mediaRecorder, recordedChunks = [], recordingWritable, recordingWriteQueue = Promise.resolve(), recordingCompletion = Promise.resolve(), isRecording = false, saveRecordingOnStop = true;
 const playlist = [];
 let currentTrackIndex = -1, trackSequence = 0, isAnalysingSet = false;
 const KEY_CONFIDENCE_THRESHOLD = .22;
@@ -34,6 +38,7 @@ const presetList = $("presetList");
 const deckPlayers = () => [$("musicPlayer"), $("musicPlayerB")];
 const activePlayer = () => deckPlayers()[activeDeck];
 const standbyPlayer = () => deckPlayers()[1 - activeDeck];
+const spokenPlayer = () => $("spokenPlayer");
 
 function waveBand(hz) {
   if (hz < 4) return "DELTA";
@@ -90,6 +95,7 @@ function createAudio() {
   createAirBed();
 
   connectMusicSources();
+  connectSpokenSource();
 
   for (let i = 0; i < 10; i++) {
     const left = audioContext.createOscillator();
@@ -175,6 +181,44 @@ function connectMusicSources() {
     musicSources.push(source);
     musicGains.push(gain);
   });
+}
+
+function spokenReverbBuffer(seconds = 2.4, decay = 3.2) {
+  const length = Math.ceil(audioContext.sampleRate * seconds);
+  const buffer = audioContext.createBuffer(2, length, audioContext.sampleRate);
+  for (let channel = 0; channel < buffer.numberOfChannels; channel++) {
+    const data = buffer.getChannelData(channel);
+    for (let sample = 0; sample < length; sample++) {
+      const envelope = Math.pow(1 - sample / length, decay);
+      data[sample] = (Math.random() * 2 - 1) * envelope;
+    }
+  }
+  return buffer;
+}
+
+function connectSpokenSource() {
+  if (!audioContext || spokenSource) return;
+  spokenSource = audioContext.createMediaElementSource(spokenPlayer());
+  spokenDry = audioContext.createGain();
+  spokenWet = audioContext.createGain();
+  spokenOutput = audioContext.createGain();
+  spokenConvolver = audioContext.createConvolver();
+  spokenConvolver.buffer = spokenReverbBuffer();
+  spokenSource.connect(spokenDry).connect(spokenOutput);
+  spokenSource.connect(spokenConvolver).connect(spokenWet).connect(spokenOutput);
+  spokenOutput.connect(audioContext.destination);
+  spokenOutput.connect(recordDestination);
+  spokenOutput.gain.value = Number($("spokenVolume").value);
+  updateSpokenReverb(true);
+}
+
+function updateSpokenReverb(immediate = false) {
+  if (!audioContext || !spokenDry || !spokenWet) return;
+  const wet = Number($("spokenReverb").value);
+  const now = audioContext.currentTime;
+  const smoothing = immediate ? .01 : .04;
+  spokenDry.gain.setTargetAtTime(Math.cos(wet * Math.PI / 2), now, smoothing);
+  spokenWet.gain.setTargetAtTime(Math.sin(wet * Math.PI / 2) * .72, now, smoothing);
 }
 
 function updateMusicEq(immediate = false) {
@@ -430,12 +474,242 @@ function updateVoiceGains() {
   });
 }
 
+function spokenItemDuration(item) {
+  return item?.type === "silence" ? item.seconds : item?.duration || 0;
+}
+
+function formatSpokenDuration(seconds) {
+  if (!Number.isFinite(seconds)) return "0:00";
+  if (seconds < 10 && seconds % 1) return `0:${seconds.toFixed(1).padStart(4, "0")}`;
+  return formatTime(seconds);
+}
+
+function createSilenceItem(seconds) {
+  const duration = Math.round(seconds * 10) / 10;
+  return {
+    id: `spoken-${++spokenTrackSequence}`,
+    type: "silence",
+    name: `${formatSpokenDuration(duration)} silence`,
+    seconds: duration,
+    duration
+  };
+}
+
+function updateSpokenSummary() {
+  const audioCount = spokenQueue.filter((item) => item.type === "audio").length;
+  const silenceCount = spokenQueue.length - audioCount;
+  $("spokenSummary").textContent = `${spokenQueue.length} ITEM${spokenQueue.length === 1 ? "" : "S"} · ${audioCount} AUDIO${silenceCount ? ` · ${silenceCount} SILENCE` : ""} · FOLLOWS MASTER TRANSPORT`;
+  $("clearSpokenButton").disabled = spokenQueue.length === 0 || isRecording;
+  $("spokenAudioFile").disabled = isRecording;
+  $("addSilenceButton").disabled = isRecording;
+  $("addRandomGapsButton").disabled = isRecording || audioCount < 2;
+}
+
+function renderSpokenQueue() {
+  const container = $("spokenQueue");
+  container.innerHTML = "";
+  if (!spokenQueue.length) {
+    const empty = document.createElement("div");
+    empty.className = "playlist-empty";
+    empty.textContent = "Audio files and timed silence will appear here.";
+    container.appendChild(empty);
+    updateSpokenSummary();
+    return;
+  }
+  spokenQueue.forEach((item, index) => {
+    const row = document.createElement("div");
+    row.className = `spoken-queue-item${index === spokenIndex ? " current" : ""}`;
+    const order = document.createElement("span");
+    order.className = "track-order";
+    order.textContent = String(index + 1).padStart(2, "0");
+    const title = document.createElement("button");
+    title.className = "track-title-button";
+    title.textContent = item.name;
+    title.addEventListener("click", () => selectSpokenItem(index, state.playing));
+    const kind = document.createElement("span");
+    kind.className = `spoken-kind${item.type === "silence" ? " silence" : ""}`;
+    kind.textContent = item.type === "silence" ? "SILENCE" : "AUDIO";
+    const duration = document.createElement("span");
+    duration.className = "spoken-time";
+    duration.textContent = item.duration ? formatSpokenDuration(spokenItemDuration(item)) : "—";
+    const actions = document.createElement("div");
+    actions.className = "row-actions";
+    [
+      { label: "Move up", glyph: "↑", disabled: index === 0, run: () => moveSpokenItem(index, -1) },
+      { label: "Move down", glyph: "↓", disabled: index === spokenQueue.length - 1, run: () => moveSpokenItem(index, 1) },
+      { label: "Remove", glyph: "×", disabled: isRecording, run: () => removeSpokenItem(index) }
+    ].forEach((action) => {
+      const button = document.createElement("button");
+      button.className = "row-action";
+      button.type = "button";
+      button.textContent = action.glyph;
+      button.title = action.label;
+      button.setAttribute("aria-label", `${action.label} ${item.name}`);
+      button.disabled = action.disabled || isRecording;
+      button.addEventListener("click", action.run);
+      actions.appendChild(button);
+    });
+    row.append(order, title, kind, duration, actions);
+    container.appendChild(row);
+  });
+  updateSpokenSummary();
+}
+
+function stopSpokenSilence() {
+  if (!spokenSilenceTimer) return;
+  spokenSilenceRemaining = Math.max(0, spokenSilenceRemaining - (performance.now() - spokenSilenceStartedAt) / 1000);
+  clearInterval(spokenSilenceTimer);
+  spokenSilenceTimer = null;
+}
+
+function startSpokenSilence() {
+  const item = spokenQueue[spokenIndex];
+  if (!item || item.type !== "silence" || !state.playing) return;
+  if (spokenSilenceRemaining <= 0) spokenSilenceRemaining = item.seconds;
+  spokenSilenceStartedAt = performance.now();
+  const tick = () => {
+    const remaining = Math.max(0, spokenSilenceRemaining - (performance.now() - spokenSilenceStartedAt) / 1000);
+    const elapsed = item.seconds - remaining;
+    $("spokenCurrentTime").textContent = formatTime(elapsed);
+    $("spokenPosition").value = elapsed;
+    if (remaining <= 0) {
+      clearInterval(spokenSilenceTimer);
+      spokenSilenceTimer = null;
+      spokenSilenceRemaining = 0;
+      advanceSpokenQueue();
+    }
+  };
+  tick();
+  spokenSilenceTimer = setInterval(tick, 100);
+}
+
+async function selectSpokenItem(index, autoplay = false) {
+  const item = spokenQueue[index];
+  if (!item) return;
+  stopSpokenSilence();
+  const player = spokenPlayer();
+  player.pause();
+  spokenIndex = index;
+  spokenQueueFinished = false;
+  spokenSilenceRemaining = item.type === "silence" ? item.seconds : 0;
+  $("spokenNowIndex").textContent = String(index + 1).padStart(2, "0");
+  $("spokenDeckTitle").textContent = item.name;
+  $("spokenMeta").style.color = "";
+  $("spokenMeta").textContent = item.type === "silence" ? `TIMED PAUSE · ${formatSpokenDuration(item.seconds)}` : `${(item.file.size / 1048576).toFixed(1)} MB · ITEM ${index + 1} OF ${spokenQueue.length}`;
+  $("spokenCurrentTime").textContent = "0:00";
+  $("spokenDuration").textContent = formatSpokenDuration(spokenItemDuration(item));
+  $("spokenPosition").max = spokenItemDuration(item) || 100;
+  $("spokenPosition").value = 0;
+  $("spokenPosition").disabled = item.type === "silence";
+  $("spokenPositionWrap").classList.remove("disabled");
+  if (item.type === "audio") {
+    player.src = item.url;
+    player.load();
+    if (autoplay) {
+      try { await player.play(); } catch (error) { console.warn("The spoken-word item could not start", error); }
+    }
+  } else {
+    player.removeAttribute("src");
+    player.load();
+    if (autoplay) startSpokenSilence();
+  }
+  renderSpokenQueue();
+}
+
+async function advanceSpokenQueue() {
+  const nextIndex = spokenIndex + 1;
+  if (nextIndex < spokenQueue.length) {
+    await selectSpokenItem(nextIndex, state.playing);
+    return;
+  }
+  spokenQueueFinished = true;
+  $("spokenMeta").textContent = "QUEUE FINISHED";
+  maybeFinishCombinedPlayback();
+}
+
+function pauseSpokenDeck() {
+  spokenPlayer().pause();
+  stopSpokenSilence();
+}
+
+async function resumeSpokenDeck() {
+  if (!spokenQueue.length || spokenQueueFinished) return;
+  if (spokenIndex < 0) await selectSpokenItem(0, false);
+  const item = spokenQueue[spokenIndex];
+  if (item?.type === "silence") startSpokenSilence();
+  else if (spokenPlayer().src) {
+    try { await spokenPlayer().play(); } catch (error) { console.warn("The spoken-word item could not resume", error); }
+  }
+}
+
+function maybeFinishCombinedPlayback() {
+  if (!musicQueueFinished || !spokenQueueFinished) return;
+  state.playing = false;
+  if (audioContext) masterGain.gain.setTargetAtTime(0, audioContext.currentTime, .06);
+  stopAdaptiveAudio();
+  pauseSpokenDeck();
+  document.body.classList.remove("playing");
+  $("playButton").setAttribute("aria-pressed", "false");
+  $("playButton").setAttribute("aria-label", "Start audio");
+  if (isRecording) {
+    stopSetRecording(true);
+    $("playStatus").textContent = "SAVING RECORDING";
+  } else $("playStatus").textContent = "FINISHED";
+}
+
+function moveSpokenItem(index, direction) {
+  const target = index + direction;
+  if (target < 0 || target >= spokenQueue.length || isRecording) return;
+  const currentId = spokenQueue[spokenIndex]?.id;
+  [spokenQueue[index], spokenQueue[target]] = [spokenQueue[target], spokenQueue[index]];
+  spokenIndex = spokenQueue.findIndex((item) => item.id === currentId);
+  renderSpokenQueue();
+}
+
+function removeSpokenItem(index) {
+  if (isRecording) return;
+  const removed = spokenQueue[index];
+  const wasCurrent = index === spokenIndex;
+  spokenQueue.splice(index, 1);
+  if (removed.type === "audio") URL.revokeObjectURL(removed.url);
+  if (wasCurrent) {
+    if (spokenQueue.length) selectSpokenItem(Math.min(index, spokenQueue.length - 1), state.playing);
+    else resetSpokenDeck();
+  } else if (index < spokenIndex) spokenIndex -= 1;
+  renderSpokenQueue();
+}
+
+function resetSpokenDeck() {
+  stopSpokenSilence();
+  spokenPlayer().pause();
+  spokenPlayer().removeAttribute("src");
+  spokenPlayer().load();
+  spokenIndex = -1;
+  spokenQueueFinished = spokenQueue.length === 0;
+  spokenSilenceRemaining = 0;
+  $("spokenNowIndex").textContent = "—";
+  $("spokenDeckTitle").textContent = "No spoken-word item loaded";
+  $("spokenMeta").textContent = "ADD AUDIO OR SILENCE TO BUILD AN INDEPENDENT QUEUE";
+  $("spokenCurrentTime").textContent = "0:00";
+  $("spokenDuration").textContent = "0:00";
+  $("spokenPosition").value = 0;
+  $("spokenPosition").disabled = true;
+  $("spokenPositionWrap").classList.add("disabled");
+}
+
 async function togglePlay() {
+  const starting = !state.playing;
   if (playlist.length && playlist.some((track) => track.status !== "analysed")) {
     $("playStatus").textContent = isAnalysingSet ? "ANALYSING SET" : "ANALYSE SET FIRST";
     return;
   }
-  if (playlist.length && currentTrackIndex < 0) await selectTrack(0, false);
+  if (starting && playlist.length && (currentTrackIndex < 0 || (musicQueueFinished && spokenQueueFinished))) {
+    await selectTrack(0, false);
+    musicQueueFinished = false;
+  }
+  if (starting && !playlist.length) musicQueueFinished = true;
+  if (starting && spokenQueue.length && (spokenIndex < 0 || (spokenQueueFinished && musicQueueFinished))) await selectSpokenItem(0, false);
+  if (starting && !spokenQueue.length) spokenQueueFinished = true;
   if (!createAudio()) {
     $("playStatus").textContent = "AUDIO UNSUPPORTED";
     $("playButton").setAttribute("aria-label", "Web Audio is not supported in this browser");
@@ -449,6 +723,8 @@ async function togglePlay() {
   else masterGain.gain.setTargetAtTime(0, audioContext.currentTime, .06);
   if (state.playing) startAdaptiveAudio();
   else stopAdaptiveAudio();
+  if (state.playing) await resumeSpokenDeck();
+  else pauseSpokenDeck();
   document.body.classList.toggle("playing", state.playing);
   $("sortKeyButton").disabled = state.playing || playlist.length < 2 || playlist.some((track) => track.status !== "analysed");
   $("playButton").setAttribute("aria-pressed", String(state.playing));
@@ -460,7 +736,7 @@ async function togglePlay() {
   $("playStatus").textContent = isRecording
     ? state.playing ? `RECORDING ${currentTrackIndex + 1}/${playlist.length}` : "RECORDING PAUSED"
     : state.playing && playlist.length ? `PLAYING ${currentTrackIndex + 1}/${playlist.length}` : state.playing ? "PLAYING" : "PAUSED";
-  if (activePlayer().src) {
+  if (activePlayer().src && !musicQueueFinished) {
     if (state.playing) {
       try { await activePlayer().play(); } catch (error) { console.warn("The local track could not start", error); }
     } else {
@@ -494,8 +770,9 @@ function downloadRecording(blob, extension) {
   link.style.display = "none";
   document.body.appendChild(link);
   link.click();
-  link.remove();
-  setTimeout(() => URL.revokeObjectURL(url), 60000);
+  // Keep both the anchor and Blob URL alive for the lifetime of the page. Large
+  // automatic downloads can still be finalising after a fixed revoke timeout,
+  // leaving Chromium with a complete but unconfirmed .crdownload file.
 }
 
 function updateRecordingUI() {
@@ -505,6 +782,7 @@ function updateRecordingUI() {
   $("recordSetButton").querySelector("span").textContent = isRecording ? "STOP + SAVE" : "PLAY + REC SET";
   $("audioFile").disabled = isRecording || isAnalysingSet;
   renderPlaylist();
+  renderSpokenQueue();
 }
 
 async function startSetRecording() {
@@ -548,10 +826,15 @@ async function startSetRecording() {
 
   if (state.playing) await togglePlay();
   await selectTrack(0, false);
+  musicQueueFinished = false;
+  if (spokenQueue.length) await selectSpokenItem(0, false);
+  spokenQueueFinished = spokenQueue.length === 0;
   if (audioContext.state === "suspended") await audioContext.resume();
 
   recordedChunks = [];
   saveRecordingOnStop = true;
+  let resolveRecordingCompletion;
+  recordingCompletion = new Promise((resolve) => { resolveRecordingCompletion = resolve; });
   mediaRecorder.addEventListener("dataavailable", (event) => {
     if (!event.data?.size) return;
     if (recordingWritable) recordingWriteQueue = recordingWriteQueue.then(() => recordingWritable.write(event.data));
@@ -559,13 +842,20 @@ async function startSetRecording() {
   });
   mediaRecorder.addEventListener("error", (event) => { console.warn("Recording error", event.error); $("playStatus").textContent = "RECORDING ERROR"; });
   mediaRecorder.addEventListener("stop", async () => {
+    let saved = false;
     try {
       await recordingWriteQueue;
       if (recordingWritable) {
-        if (saveRecordingOnStop) await recordingWritable.close();
+        if (saveRecordingOnStop) {
+          await recordingWritable.close();
+          saved = true;
+          $("playStatus").textContent = "RECORDING SAVED";
+        }
         else await recordingWritable.abort();
       } else if (saveRecordingOnStop && recordedChunks.length) {
         downloadRecording(new Blob(recordedChunks, { type: actualType }), extension);
+        saved = true;
+        $("playStatus").textContent = "DOWNLOAD STARTED";
       }
     } catch (error) {
       console.warn("Could not finish the recording file", error);
@@ -575,6 +865,7 @@ async function startSetRecording() {
     recordingWritable = null;
     recordingWriteQueue = Promise.resolve();
     mediaRecorder = null;
+    resolveRecordingCompletion(saved);
   }, { once: true });
 
   isRecording = true;
@@ -583,13 +874,20 @@ async function startSetRecording() {
   await togglePlay();
 }
 
-function stopSetRecording(save = true) {
-  if (!isRecording || !mediaRecorder) return;
+async function stopSetRecording(save = true) {
+  if (!isRecording || !mediaRecorder) return recordingCompletion;
   saveRecordingOnStop = save;
   if (mediaRecorder.state === "paused") mediaRecorder.resume();
-  if (mediaRecorder.state !== "inactive") mediaRecorder.stop();
+  if (mediaRecorder.state !== "inactive") {
+    if (save && mediaRecorder.state === "recording") {
+      try { mediaRecorder.requestData(); }
+      catch (error) { console.warn("Could not request the final recording chunk", error); }
+    }
+    mediaRecorder.stop();
+  }
   isRecording = false;
   updateRecordingUI();
+  return recordingCompletion;
 }
 
 function applyPreset(index) {
@@ -882,6 +1180,7 @@ function cancelCrossfade() {
 async function selectTrack(index, autoplay = false) {
   const track = playlist[index];
   if (!track) return;
+  musicQueueFinished = false;
   cancelCrossfade();
   const player = activePlayer();
   player.pause();
@@ -1445,10 +1744,88 @@ $("audioFile").addEventListener("change", (event) => {
     presetOverride: null,
     status: "queued"
   }));
+  musicQueueFinished = false;
   event.target.value = "";
   if (currentTrackIndex < 0) selectTrack(0, false);
   renderPlaylist();
   analyseSet(false);
+});
+
+$("spokenAudioFile").addEventListener("change", (event) => {
+  const files = [...(event.target.files || [])];
+  if (!files.length) return;
+  files.forEach((file) => spokenQueue.push({
+    id: `spoken-${++spokenTrackSequence}`,
+    type: "audio",
+    file,
+    url: URL.createObjectURL(file),
+    name: file.name.replace(/\.[^.]+$/, ""),
+    duration: 0
+  }));
+  spokenQueueFinished = false;
+  event.target.value = "";
+  if (spokenIndex < 0) selectSpokenItem(0, state.playing);
+  renderSpokenQueue();
+});
+
+$("addSilenceButton").addEventListener("click", () => {
+  const seconds = Math.min(3600, Math.max(1, Math.round(Number($("silenceDuration").value) || 30)));
+  $("silenceDuration").value = seconds;
+  spokenQueue.push(createSilenceItem(seconds));
+  spokenQueueFinished = false;
+  if (spokenIndex < 0) selectSpokenItem(0, state.playing);
+  renderSpokenQueue();
+});
+
+$("addRandomGapsButton").addEventListener("click", () => {
+  if (isRecording) return;
+  const currentId = spokenQueue[spokenIndex]?.id;
+  const wasFinished = spokenQueueFinished;
+  const expandedQueue = [];
+  let inserted = 0;
+  spokenQueue.forEach((item, index) => {
+    expandedQueue.push(item);
+    if (item.type !== "audio") return;
+    const nextAudioIndex = spokenQueue.findIndex((candidate, candidateIndex) => candidateIndex > index && candidate.type === "audio");
+    if (nextAudioIndex < 0) return;
+    const alreadyHasPause = spokenQueue.slice(index + 1, nextAudioIndex).some((candidate) => candidate.type === "silence");
+    if (alreadyHasPause) return;
+    const seconds = Math.round((.5 + Math.random() * 2) * 10) / 10;
+    expandedQueue.push(createSilenceItem(seconds));
+    inserted += 1;
+  });
+  if (!inserted) return;
+  spokenQueue.splice(0, spokenQueue.length, ...expandedQueue);
+  spokenIndex = spokenQueue.findIndex((item) => item.id === currentId);
+  spokenQueueFinished = wasFinished;
+  const currentItem = spokenQueue[spokenIndex];
+  if (currentItem?.type === "audio") {
+    $("spokenMeta").textContent = `${(currentItem.file.size / 1048576).toFixed(1)} MB · ITEM ${spokenIndex + 1} OF ${spokenQueue.length}`;
+  }
+  renderSpokenQueue();
+});
+
+$("clearSpokenButton").addEventListener("click", () => {
+  spokenQueue.forEach((item) => { if (item.type === "audio") URL.revokeObjectURL(item.url); });
+  spokenQueue.length = 0;
+  resetSpokenDeck();
+  renderSpokenQueue();
+  maybeFinishCombinedPlayback();
+});
+
+$("spokenVolume").addEventListener("input", (event) => {
+  const value = Number(event.target.value);
+  $("spokenVolumeValue").textContent = `${Math.round(value * 100)}%`;
+  if (audioContext && spokenOutput) spokenOutput.gain.setTargetAtTime(value, audioContext.currentTime, .04);
+});
+
+$("spokenReverb").addEventListener("input", (event) => {
+  $("spokenReverbValue").textContent = `${Math.round(Number(event.target.value) * 100)}%`;
+  updateSpokenReverb();
+});
+
+$("spokenPosition").addEventListener("input", (event) => {
+  if (spokenQueue[spokenIndex]?.type === "audio") spokenPlayer().currentTime = Number(event.target.value);
 });
 
 $("analyseSetButton").addEventListener("click", () => analyseSet(true));
@@ -1458,6 +1835,7 @@ $("clearSetButton").addEventListener("click", () => {
   if (state.playing && activePlayer().src) {
     state.playing = false;
     deckPlayers().forEach((player) => player.pause());
+    pauseSpokenDeck();
     if (audioContext) masterGain.gain.setTargetAtTime(0, audioContext.currentTime, .06);
     stopAdaptiveAudio();
     document.body.classList.remove("playing");
@@ -1466,6 +1844,7 @@ $("clearSetButton").addEventListener("click", () => {
   }
   playlist.forEach((track) => URL.revokeObjectURL(track.url));
   playlist.length = 0;
+  musicQueueFinished = true;
   resetCurrentTrackUI();
   renderPlaylist();
   $("playStatus").textContent = "READY";
@@ -1503,16 +1882,34 @@ deckPlayers().forEach((player) => {
       $("playStatus").textContent = `PLAYING ${nextIndex + 1}/${playlist.length}`;
       return;
     }
-    const completedRecording = isRecording;
-    state.playing = false;
+    musicQueueFinished = true;
     if (audioContext) masterGain.gain.setTargetAtTime(0, audioContext.currentTime, .06);
     stopAdaptiveAudio();
-    document.body.classList.remove("playing");
-    $("playButton").setAttribute("aria-pressed", "false");
-    $("playButton").setAttribute("aria-label", "Start audio");
-    if (completedRecording) stopSetRecording(true);
-    $("playStatus").textContent = completedRecording ? "SAVING RECORDING" : "FINISHED";
+    if (!spokenQueueFinished) $("playStatus").textContent = `${isRecording ? "RECORDING" : "PLAYING"} DECK 02`;
+    maybeFinishCombinedPlayback();
   });
+});
+
+spokenPlayer().addEventListener("loadedmetadata", () => {
+  const item = spokenQueue[spokenIndex];
+  if (!item || item.type !== "audio") return;
+  item.duration = spokenPlayer().duration || 0;
+  $("spokenDuration").textContent = formatTime(item.duration);
+  $("spokenPosition").max = item.duration || 100;
+  renderSpokenQueue();
+});
+spokenPlayer().addEventListener("timeupdate", () => {
+  const item = spokenQueue[spokenIndex];
+  if (!item || item.type !== "audio") return;
+  $("spokenCurrentTime").textContent = formatTime(spokenPlayer().currentTime);
+  if (!$("spokenPosition").matches(":active")) $("spokenPosition").value = spokenPlayer().currentTime;
+});
+spokenPlayer().addEventListener("ended", advanceSpokenQueue);
+spokenPlayer().addEventListener("error", () => {
+  const item = spokenQueue[spokenIndex];
+  if (!item || item.type !== "audio" || !spokenPlayer().getAttribute("src")) return;
+  $("spokenMeta").textContent = "THIS AUDIOBOOK CODEC COULD NOT BE DECODED BY THE BROWSER";
+  $("spokenMeta").style.color = "#ff815d";
 });
 $("trackPosition").addEventListener("input", (event) => {
   if (crossfadeInProgress) cancelCrossfade();
@@ -1572,8 +1969,8 @@ $("impulseAmount").addEventListener("input", (event) => {
 $("recordSetButton").addEventListener("click", async () => {
   if (isRecording) {
     if (state.playing) await togglePlay();
-    stopSetRecording(true);
     $("playStatus").textContent = "SAVING RECORDING";
+    await stopSetRecording(true);
   } else await startSetRecording();
 });
 $("autoMatchButton").addEventListener("click", () => {
@@ -1595,7 +1992,10 @@ document.querySelectorAll(".relation").forEach((button) => button.addEventListen
   document.querySelectorAll(".relation").forEach((el) => el.classList.toggle("active", el === button));
   if (state.autoMatch) matchCarrierToKey();
 }));
-window.addEventListener("beforeunload", () => playlist.forEach((track) => URL.revokeObjectURL(track.url)));
+window.addEventListener("beforeunload", () => {
+  playlist.forEach((track) => URL.revokeObjectURL(track.url));
+  spokenQueue.forEach((item) => { if (item.type === "audio") URL.revokeObjectURL(item.url); });
+});
 
 document.querySelectorAll(".tone").forEach((button) => button.addEventListener("click", () => {
   state.wave = button.dataset.wave;
@@ -1646,4 +2046,4 @@ function drawField() {
 }
 
 window.addEventListener("resize", resizeCanvas);
-buildUI(); renderPlaylist(); updateReadouts(); updateAdaptiveStatus(null); resizeCanvas(); drawField();
+buildUI(); renderPlaylist(); renderSpokenQueue(); updateReadouts(); updateAdaptiveStatus(null); resizeCanvas(); drawField();

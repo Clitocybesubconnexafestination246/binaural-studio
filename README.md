@@ -1,6 +1,6 @@
 # Phase — Binaural Studio
 
-A standalone binaural beat generator and local music player built with the Web Audio API. It includes ten harmonic carrier pairs, seven brainwave-state presets, per-harmonic mixing, adjustable beat and carrier frequencies, two oscillator shapes, offline key/BPM analysis, automatic carrier matching, adaptive impulse noise, and a responsive animated interface.
+A standalone binaural beat generator and two-deck local audio player built with the Web Audio API. It includes ten harmonic carrier pairs, seven brainwave-state presets, per-harmonic mixing, adjustable beat and carrier frequencies, two oscillator shapes, offline key/BPM analysis, automatic carrier matching, adaptive impulse noise, and a responsive animated interface.
 
 The manual binaural studio is collapsed on launch so the local-set workflow stays immediately visible. Its compact header retains the active state, beat frequency, playback transport, and recording action; expand **Manual tone controls** whenever presets, signal controls, or the harmonic mixer are needed.
 
@@ -14,6 +14,14 @@ The same preflight pass estimates BPM, pulse confidence, and beat phase. The **I
 
 Tracks play in the displayed order and automatically advance. Use the arrow controls to reorder the set or remove individual files. The carrier glides to the analysed root or fifth at each transition. The main play button controls both the music and binaural layer; moving the base-carrier slider switches matching back to manual mode.
 
+## Spoken-word deck
+
+Deck 02 is a separate local queue for narration, podcasts, guided sessions, and audiobooks. It follows the main play/pause transport but has its own playback position, queue order, output volume, and convolution reverb. Add timed silent periods directly, or use **Random gaps** to insert a 0.5–2.5 second pause between every pair of audio files that does not already have silence between them. Silence pauses and resumes accurately with the master transport.
+
+The spoken-word bus is deliberately excluded from musical analysis and generated-layer automation. Key matching, binaural level, adaptive texture, breathing, state cues, and crossfades continue to depend only on Deck 01. Deck 02 is nevertheless routed into the recorded master mix.
+
+Common browser audio formats are supported, including MP3, M4A/AAC, WAV, FLAC, Ogg/Opus, WebM, and browser-decodable M4B files. M4B is an MPEG-4 container, so actual playback depends on the audio codec supported by the current browser. DRM-protected formats such as Audible AAX are not supported by browser audio APIs.
+
 The music path includes a three-band track EQ: Low (120 Hz shelf), Mid (1 kHz bell), and High (8 kHz shelf), each adjustable by ±12 dB. It affects local music playback and the recorded mix without colouring the generated binaural or adaptive layers. Double-click any EQ dial to return it to 0 dB.
 
 Automatic matching compares the analysed key's root and fifth inside a deliberately low carrier octave of roughly 92–175 Hz, then selects whichever candidate is lower in absolute frequency. The relationship indicator updates at each reliable key change. Whole-track waveform analysis also maps quiet and silent passages before playback, allowing the binaural layer to duck smoothly when it would otherwise become exposed. It estimates each file's integrated RMS loudness as a second, independent signal: a quieter or less-compressed master lowers both the binaural bed and adaptive texture relative to the user's chosen controls, avoiding a generated-layer jump between differently mastered tracks. Low-confidence key estimates retain the last reliable carrier instead of forcing a new pitch.
@@ -26,7 +34,7 @@ During an automatic crossfade, the binaural carrier, beat frequency, harmonic ba
 
 ## Recording a set
 
-After every track has been analysed, choose **Play + Rec Set**. Phase rewinds to track one and captures the exact combined Web Audio output—including local music, equal-power crossfades, state cues, carrier transitions, impulse texture, and the breathing-modulated binaural layer—in real time. The recorder pauses and resumes with the main transport, stops automatically after the final track, and saves one local file. The browser chooses the best available format: M4A/AAC where supported, otherwise WebM/Opus or Ogg/Opus. No microphone permission or upload is involved.
+After every Deck 01 track has been analysed, choose **Play + Rec Set**. Phase rewinds both queues and captures the exact combined Web Audio output—including local music, spoken-word audio and reverb, timed silence, equal-power crossfades, state cues, carrier transitions, impulse texture, and the breathing-modulated binaural layer—in real time. The recorder pauses and resumes with the main transport, stops automatically after both queues finish, and saves one local file. The browser chooses the best available format: M4A/AAC where supported, otherwise WebM/Opus or Ogg/Opus. No microphone permission or upload is involved.
 
 In browsers supporting the File System Access API, Phase asks for the destination first and streams one-second encoded chunks directly to disk throughout the set, keeping memory use essentially constant. Other browsers fall back to assembling the final download in memory. A separate FFmpeg renderer would only be necessary for faster-than-real-time export and would require a manifest/desktop companion to reproduce the browser's resolved track paths and automation.
 

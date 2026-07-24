@@ -182,6 +182,57 @@
           <audio id="musicPlayerB" preload="metadata"></audio>
         </div>
       </section>
+
+      <section class="spoken-block" aria-labelledby="spokenDeckTitle">
+        <div class="section-heading spoken-heading">
+          <div>
+            <p class="eyebrow">DECK 02 / SPOKEN WORD</p>
+            <span id="spokenSummary">0 ITEMS · FOLLOWS MASTER TRANSPORT</span>
+          </div>
+          <div class="set-actions">
+            <input id="spokenAudioFile" type="file" accept="audio/*,.mp3,.m4a,.m4b,.mp4,.wav,.aac,.flac,.ogg,.oga,.opus,.webm" multiple hidden />
+            <label class="load-button" for="spokenAudioFile"><span>＋</span> ADD AUDIO</label>
+            <button class="set-button quiet" id="clearSpokenButton" disabled>CLEAR</button>
+          </div>
+        </div>
+
+        <div class="spoken-console">
+          <div class="spoken-now">
+            <span class="now-index" id="spokenNowIndex">—</span>
+            <div class="track-copy">
+              <strong id="spokenDeckTitle">No spoken-word item loaded</strong>
+              <span id="spokenMeta">ADD AUDIO OR SILENCE TO BUILD AN INDEPENDENT QUEUE</span>
+            </div>
+          </div>
+          <div class="spoken-position disabled" id="spokenPositionWrap">
+            <span id="spokenCurrentTime">0:00</span>
+            <input id="spokenPosition" type="range" min="0" max="100" value="0" step="0.1" aria-label="Spoken-word position" disabled />
+            <span id="spokenDuration">0:00</span>
+          </div>
+          <div class="spoken-mix" aria-label="Spoken-word mix controls">
+            <label for="spokenVolume"><span>VOLUME</span><input id="spokenVolume" type="range" min="0" max="1" value="0.8" step="0.01" /><small id="spokenVolumeValue">80%</small></label>
+            <label for="spokenReverb"><span>REVERB</span><input id="spokenReverb" type="range" min="0" max="1" value="0.12" step="0.01" /><small id="spokenReverbValue">12%</small></label>
+          </div>
+        </div>
+
+        <div class="silence-inserter">
+          <div>
+            <strong>INSERT SILENCE</strong>
+            <span>Add one pause, or place random 0.5–2.5s gaps between queued audio.</span>
+          </div>
+          <label for="silenceDuration">SECONDS <input id="silenceDuration" type="number" min="1" max="3600" value="30" step="1" /></label>
+          <button class="set-button" id="addSilenceButton">ADD TO QUEUE</button>
+          <button class="set-button" id="addRandomGapsButton" title="Insert a random 0.5–2.5 second pause between each audio file" disabled>RANDOM GAPS</button>
+        </div>
+
+        <div class="spoken-queue-head" aria-hidden="true">
+          <span>ORDER</span><span>ITEM</span><span>TYPE</span><span>TIME</span><span></span>
+        </div>
+        <div class="spoken-queue" id="spokenQueue" aria-label="Spoken-word queue">
+          <div class="playlist-empty">Audio files and timed silence will appear here.</div>
+        </div>
+        <audio id="spokenPlayer" preload="metadata"></audio>
+      </section>
     </main>
 
     <dialog id="infoDialog">
@@ -189,7 +240,7 @@
       <p class="eyebrow">HOW IT WORKS</p>
       <h2>A difference you can hear.</h2>
       <p>Phase sends a slightly different tone to each ear. Your brain perceives the frequency gap as a gentle rhythmic pulse. The ten faders mix harmonic carrier pairs for a richer sound.</p>
-      <p>Load an ordered local set and analyse it in one pass. Phase estimates each track's key, BPM, beat phase, integrated loudness, and dynamic envelope. Generated layers follow the overall master level, while carrier matching chooses the lower of the key's root and fifth. Independent Impulse and Air controls can run alone or together on any track; More Impulse controls the clacks' abundance. Record the complete music, crossfades, cues, texture, and binaural layer into one local file. Your files never leave the browser.</p>
+      <p>Load an ordered local set and analyse it in one pass. Phase estimates each track's key, BPM, beat phase, integrated loudness, and dynamic envelope. Generated layers and carrier matching continue to follow Deck 01 only. Deck 02 adds an independent spoken-word queue, timed silence, volume, and reverb without changing the binaural response. Record captures both decks in the complete local mix. Your files never leave the browser.</p>
       <p class="fine-print">Use stereo headphones at a comfortable volume. This is a relaxation and focus tool, not a medical treatment. Do not use while driving.</p>
     </dialog>
 
